@@ -1,0 +1,35 @@
+[package]
+name = "treesitter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+ignore = "0.4.33"
+rayon = "1.12.0"
+regex = "1.13.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+similar = "3.2.0"
+thiserror = "2.0.21"
+tree-sitter.workspace = true
+tree-sitter-bash = "0.25.1"
+tree-sitter-go = "0.25.0"
+tree-sitter-html = "0.23.2"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-json = "0.24.8"
+tree-sitter-language.workspace = true
+tree-sitter-md = "0.5.3"
+tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.2"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-xml = "0.7.0"
+tree-sitter-yaml = "0.7.2"
+tree-sitter-zig = "1.1.2"
+
+[dev-dependencies]
+tempfile = "3.27.0"

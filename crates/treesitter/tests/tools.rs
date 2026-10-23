@@ -1,0 +1,167 @@
+use std::fs;
+
+use treesitter::symbols::outline;
+use treesitter::tools::{Operation, Position, Request, operation_edits, rename, run};
+use treesitter::{Error, Language, apply, parse};
+
+const PYTHON: &str = "import os\n\n\nclass Greeter:\n    @staticmethod\n    def greet(name):\n        return name\n\n    def wave(self):\n        pass\n\n\ndef main():\n    Greeter.greet(\"x\")\n";
+
+const RUST: &str = "use std::fmt;\n\n#[derive(Debug)]\nstruct Point {\n    x: i32,\n}\n\nimpl Point {\n    fn len(&self) -> i32 {\n        self.x\n    }\n}\n\nfn main() {}\n";
+
+const GO: &str = "package main\n\nimport (\n\t\"os\"\n)\n\ntype List[T any] struct{}\n\nfunc (l *List[T]) Push(v T) {\n\tos.Exit(0)\n}\n\nfunc main() {}\n";
+
+const TYPESCRIPT: &str = "import { a } from \"a\";\n\nexport class Store {\n  get(key: string): string {\n    return key;\n  }\n}\n\nexport const handler = async (event: Event) => {\n  return event;\n};\n\ninterface Options {\n  x: number;\n}\n";
+
+fn paths(language: Language, source: &str) -> Result<Vec<(String, String)>, Error> {
+    let tree = parse(source.as_bytes(), language)?;
+    let symbols = outline(&tree, source.as_bytes(), language)?;
+    Ok(symbols.into_iter().map(|symbol| (symbol.path, symbol.kind)).collect())
+}
+
+fn edit(language: Language, source: &str, operation: Operation) -> Result<String, Error> {
+    let tree = parse(source.as_bytes(), language)?;
+    let symbols = outline(&tree, source.as_bytes(), language)?;
+    let edits = operation_edits(&tree, source, language, &symbols, &operation)?;
+    Ok(apply(source, language, &edits, "x", false)?.source)
+}
+
+fn pairs(items: &[(&str, &str)]) -> Vec<(String, String)> {
+    items.iter().map(|(path, kind)| ((*path).to_owned(), (*kind).to_owned())).collect()
+}
+
+#[test]
+fn outlines() {
+    assert_eq!(paths(Language::Python, PYTHON).unwrap(), pairs(&[("Greeter", "class"), ("Greeter.greet", "method"), ("Greeter.wave", "method"), ("main", "function")]));
+    assert_eq!(paths(Language::Rust, RUST).unwrap(), pairs(&[("Point", "struct"), ("impl Point", "impl"), ("Point.len", "method"), ("main", "function")]));
+    assert_eq!(paths(Language::Go, GO).unwrap(), pairs(&[("List", "type"), ("List.Push", "method"), ("main", "function")]));
+    assert_eq!(
+        paths(Language::TypeScript, TYPESCRIPT).unwrap(),
+        pairs(&[("Store", "class"), ("Store.get", "method"), ("handler", "function"), ("Options", "interface")])
+    );
+    let zig = "const Point = struct {\n    pub fn len(self: Point) i32 { return 0; }\n};\npub fn main() void {}\n";
+    assert_eq!(paths(Language::Zig, zig).unwrap(), pairs(&[("Point", "struct"), ("Point.len", "function"), ("main", "function")]));
+    assert_eq!(paths(Language::Bash, "build() {\n  make\n}\n").unwrap(), pairs(&[("build", "function")]));
+    assert!(matches!(paths(Language::Json, "{}"), Err(Error::Unsupported(_))));
+}
+
+#[test]
+fn symbol_extent_covers_decorators_and_attributes() {
+    let tree = parse(PYTHON.as_bytes(), Language::Python).unwrap();
+    let symbols = outline(&tree, PYTHON.as_bytes(), Language::Python).unwrap();
+    let greet = symbols.iter().find(|symbol| symbol.path == "Greeter.greet").unwrap();
+    assert!(PYTHON[greet.bytes[0]..greet.bytes[1]].starts_with("@staticmethod"));
+    assert_eq!(greet.signature, "@staticmethod def greet(name)");
+    let tree = parse(RUST.as_bytes(), Language::Rust).unwrap();
+    let symbols = outline(&tree, RUST.as_bytes(), Language::Rust).unwrap();
+    assert!(RUST[symbols[0].bytes[0]..].starts_with("#[derive(Debug)]"));
+}
+
+#[test]
+fn replace_and_replace_body() {
+    let replaced = edit(Language::Python, PYTHON, Operation::Replace { symbol: "wave".into(), code: "def wave(self, n):\n    return n\n".into() }).unwrap();
+    assert!(replaced.contains("    def wave(self, n):\n        return n\n\n\ndef main"), "{replaced}");
+    let body = edit(Language::Python, PYTHON, Operation::ReplaceBody { symbol: "Greeter.greet".into(), code: "x = name.upper()\nreturn x".into() }).unwrap();
+    assert!(body.contains("    def greet(name):\n        x = name.upper()\n        return x\n"), "{body}");
+    let rust = edit(Language::Rust, RUST, Operation::ReplaceBody { symbol: "Point.len".into(), code: "self.x * 2".into() }).unwrap();
+    assert!(rust.contains("    fn len(&self) -> i32 {\n        self.x * 2\n    }\n"), "{rust}");
+    let empty = edit(Language::Rust, RUST, Operation::ReplaceBody { symbol: "main".into(), code: "println!(\"hi\");".into() }).unwrap();
+    assert!(empty.ends_with("fn main() {\n    println!(\"hi\");\n}\n"), "{empty}");
+    let go = edit(Language::Go, GO, Operation::ReplaceBody { symbol: "Push".into(), code: "_ = v".into() }).unwrap();
+    assert!(go.contains("func (l *List[T]) Push(v T) {\n\t_ = v\n}"), "{go}");
+}
+
+#[test]
+fn insert_positions() {
+    let start = edit(Language::Python, PYTHON, Operation::Insert { symbol: "Greeter".into(), code: "count = 0\n".into(), position: Position::Start }).unwrap();
+    assert!(start.contains("class Greeter:\n    count = 0\n    @staticmethod"), "{start}");
+    let end = edit(Language::Rust, RUST, Operation::Insert { symbol: "impl Point".into(), code: "fn zero() -> Self {\n    Point { x: 0 }\n}".into(), position: Position::End }).unwrap();
+    assert!(end.contains("        self.x\n    }\n\n    fn zero() -> Self {\n        Point { x: 0 }\n    }\n}"), "{end}");
+    let after = edit(Language::TypeScript, TYPESCRIPT, Operation::Insert { symbol: "Store.get".into(), code: "set(key: string) {}".into(), position: Position::After }).unwrap();
+    assert!(after.contains("    return key;\n  }\n\n  set(key: string) {}\n}"), "{after}");
+    let before = edit(Language::Go, GO, Operation::Insert { symbol: "main".into(), code: "// main runs\nfunc helper() {}".into(), position: Position::Before }).unwrap();
+    assert!(before.contains("func helper() {}\n\nfunc main() {}"), "{before}");
+}
+
+#[test]
+fn delete_symbols() {
+    let python = edit(Language::Python, PYTHON, Operation::Delete { symbol: "wave".into() }).unwrap();
+    assert!(python.contains("        return name\n\n\ndef main"), "{python}");
+    assert!(!python.contains("wave"));
+    let rust = edit(Language::Rust, RUST, Operation::Delete { symbol: "Point".into() }).unwrap();
+    assert!(rust.starts_with("use std::fmt;\n\nimpl Point"), "{rust}");
+    let exported = edit(Language::TypeScript, TYPESCRIPT, Operation::Delete { symbol: "handler".into() }).unwrap();
+    assert!(!exported.contains("export const handler") && exported.contains("interface Options"), "{exported}");
+}
+
+#[test]
+fn add_imports() {
+    let python = edit(Language::Python, PYTHON, Operation::AddImport { import: "import sys".into() }).unwrap();
+    assert!(python.starts_with("import os\nimport sys\n"), "{python}");
+    assert_eq!(edit(Language::Python, PYTHON, Operation::AddImport { import: "import  os".into() }).unwrap(), PYTHON);
+    let rust = edit(Language::Rust, RUST, Operation::AddImport { import: "use std::io;".into() }).unwrap();
+    assert!(rust.starts_with("use std::fmt;\nuse std::io;\n"), "{rust}");
+    let go = edit(Language::Go, GO, Operation::AddImport { import: "fmt".into() }).unwrap();
+    assert!(go.contains("import (\n\t\"os\"\n\t\"fmt\"\n)"), "{go}");
+    let bare = edit(Language::Go, "package main\n\nfunc main() {}\n", Operation::AddImport { import: "\"fmt\"".into() }).unwrap();
+    assert_eq!(bare, "package main\n\nimport \"fmt\"\n\nfunc main() {}\n");
+    let typescript = edit(Language::TypeScript, TYPESCRIPT, Operation::AddImport { import: "import { b } from \"b\";".into() }).unwrap();
+    assert!(typescript.starts_with("import { a } from \"a\";\nimport { b } from \"b\";\n"), "{typescript}");
+    let fresh = edit(Language::Python, "\"\"\"Doc.\"\"\"\nx = 1\n", Operation::AddImport { import: "import os".into() }).unwrap();
+    assert_eq!(fresh, "\"\"\"Doc.\"\"\"\n\nimport os\nx = 1\n");
+}
+
+#[test]
+fn trait_impls_get_their_own_path() {
+    let source = "struct P;\nimpl P { fn a(&self) {} }\nimpl std::fmt::Display for P { fn fmt(&self) {} }\n";
+    let found = paths(Language::Rust, source).unwrap();
+    assert_eq!(found, pairs(&[("P", "struct"), ("impl P", "impl"), ("P.a", "method"), ("impl std::fmt::Display for P", "impl"), ("P.fmt", "method")]));
+}
+
+#[test]
+fn lookup_errors() {
+    let missing = edit(Language::Python, PYTHON, Operation::Delete { symbol: "nope".into() });
+    assert!(matches!(missing, Err(Error::NoSymbol { .. })));
+    let ambiguous = "class A:\n    def f(self): pass\nclass B:\n    def f(self): pass\n";
+    assert!(matches!(edit(Language::Python, ambiguous, Operation::Delete { symbol: "f".into() }), Err(Error::Ambiguous { .. })));
+    assert!(edit(Language::Python, ambiguous, Operation::Delete { symbol: "B.f".into() }).is_ok());
+}
+
+#[test]
+fn batch_and_rename_on_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("m.py");
+    fs::write(&path, PYTHON).unwrap();
+    let requests = vec![
+        Request { file: path.clone(), language: None, operation: Operation::AddImport { import: "import sys".into() } },
+        Request { file: path.clone(), language: None, operation: Operation::ReplaceBody { symbol: "main".into(), code: "sys.exit(0)".into() } },
+    ];
+    let changes = run(&requests, false, false).unwrap();
+    assert_eq!(changes[0].change.edits, 2);
+    let written = fs::read_to_string(&path).unwrap();
+    assert!(written.starts_with("import os\nimport sys\n") && written.ends_with("def main():\n    sys.exit(0)\n"), "{written}");
+
+    let renamed = rename(&[directory.path().to_path_buf()], None, "Greeter", "Welcomer", false, false).unwrap();
+    assert_eq!(renamed[0].change.edits, 1);
+    fs::write(&path, PYTHON).unwrap();
+    rename(&[directory.path().to_path_buf()], None, "Greeter", "Welcomer", false, false).unwrap();
+    let written = fs::read_to_string(&path).unwrap();
+    assert!(written.contains("class Welcomer:") && written.contains("Welcomer.greet(\"x\")"), "{written}");
+}
+
+#[test]
+fn doc_comments_travel_with_their_symbol() {
+    let rust = "use x;\n\n/// Adds.\n#[inline]\nfn add() {}\n\n/// Main.\nfn main() {}\n";
+    let deleted = edit(Language::Rust, rust, Operation::Delete { symbol: "add".into() }).unwrap();
+    assert_eq!(deleted, "use x;\n\n/// Main.\nfn main() {}\n");
+    let before = edit(Language::Rust, rust, Operation::Insert { symbol: "main".into(), code: "fn other() {}".into(), position: Position::Before }).unwrap();
+    assert!(before.contains("fn other() {}\n\n/// Main.\nfn main() {}"), "{before}");
+    let go = "package p\n\n// Run runs.\n// Twice.\nfunc Run() {}\n\n// Stop stops.\nfunc Stop() {}\n";
+    let deleted = edit(Language::Go, go, Operation::Delete { symbol: "Run".into() }).unwrap();
+    assert_eq!(deleted, "package p\n\n// Stop stops.\nfunc Stop() {}\n");
+    let typescript = "/** A. */\nexport function a() {}\n\n// plain\n\nfunction b() {}\n";
+    let deleted = edit(Language::TypeScript, typescript, Operation::Delete { symbol: "a".into() }).unwrap();
+    assert_eq!(deleted, "// plain\n\nfunction b() {}\n");
+    let tree = parse(rust.as_bytes(), Language::Rust).unwrap();
+    let symbols = outline(&tree, rust.as_bytes(), Language::Rust).unwrap();
+    assert_eq!(symbols[0].signature, "#[inline] fn add()");
+}

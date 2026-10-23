@@ -1,0 +1,5 @@
+Vendored from https://github.com/tree-sitter/tree-sitter at commit 0fff6ab6ed206903856200e5390c5dad22924948 (MIT, see LICENSE).
+Contents: lib/ (C core + Rust binding) and crates/language/ as language/.
+
+Local patches:
+- lib/src/query.c: a predicate at the top level of a query (outside any pattern) is a syntax error instead of being silently dropped.

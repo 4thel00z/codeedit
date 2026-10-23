@@ -1,0 +1,31 @@
+[workspace]
+members = ["crates/treesitter", "crates/cli", "crates/python"]
+exclude = ["vendor"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.90"
+
+[workspace.dependencies]
+tree-sitter = { path = "vendor/tree-sitter/lib" }
+tree-sitter-language = { path = "vendor/tree-sitter/language" }
+treesitter = { path = "crates/treesitter" }
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[patch.crates-io]
+tree-sitter = { path = "vendor/tree-sitter/lib" }
+tree-sitter-language = { path = "vendor/tree-sitter/language" }
+
+[profile.release]
+lto = true
+codegen-units = 1

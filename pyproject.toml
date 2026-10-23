@@ -1,0 +1,23 @@
+[project]
+name = "treesitter"
+version = "0.1.0"
+description = "Parse code in any language, dump its syntax tree as JSON, and apply structured edits"
+license = "MIT"
+requires-python = ">=3.13"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+manifest-path = "crates/python/Cargo.toml"
+module-name = "treesitter.native"
+python-source = "python"
+features = ["pyo3/extension-module"]
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "crates/**/*.rs" }, { file = "crates/**/Cargo.toml" }, { file = "vendor/**/*.c" }, { file = "vendor/**/*.h" }, { file = "vendor/**/*.rs" }]

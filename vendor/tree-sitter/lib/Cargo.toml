@@ -1,0 +1,87 @@
+[package]
+name = "tree-sitter"
+version = "0.28.0"
+description = "Rust bindings to the Tree-sitter parsing library"
+authors = [ "Max Brunsfeld <maxbrunsfeld@gmail.com>", "Amaan Qureshi <amaanq12@gmail.com>" ]
+edition = "2024"
+rust-version = "1.90"
+readme = "binding_rust/README.md"
+homepage = "https://tree-sitter.github.io/tree-sitter"
+repository = "https://github.com/tree-sitter/tree-sitter"
+documentation = "https://docs.rs/tree-sitter"
+license = "MIT"
+keywords = [ "incremental", "parsing" ]
+categories = [ "api-bindings", "external-ffi-bindings", "parsing", "text-editors" ]
+
+build = "binding_rust/build.rs"
+links = "tree-sitter"
+
+include = [
+  "/binding_rust/*",
+  "/Cargo.toml",
+  "/src/*.h",
+  "/src/*.c",
+  "/src/portable/*",
+  "/src/unicode/*",
+  "/src/wasm-stdlib/**/*",
+  "/include/tree_sitter/api.h",
+  "/LICENSE",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = [ "--cfg", "docsrs" ]
+targets = [ "x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu" ]
+
+
+[features]
+default = [ "std" ]
+js-loader = [
+  "std",
+  "dep:js-sys",
+  "dep:wasm-bindgen",
+  "dep:wasm-bindgen-futures",
+  "dep:wasmparser",
+]
+std = [ "regex/std", "regex/perf" ]
+wasm = [ "std", "wasmtime-c-api" ]
+
+[dependencies]
+regex = { default-features = false, features = [ "unicode" ], version = "1.12.3" }
+streaming-iterator = "0.1.9"
+tree-sitter-language = { path = "../language", version = "0.1" }
+
+[dependencies.wasmtime-c-api]
+default-features = false
+features = [ "cranelift", "gc", "gc-null" ]
+optional = true
+package = "wasmtime-c-api-impl"
+version = "48.0.7"
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+js-sys = { optional = true, version = "0.3" }
+wasm-bindgen = { optional = true, version = "0.2" }
+wasm-bindgen-futures = { optional = true, version = "0.4" }
+wasmparser = { default-features = false, features = [
+  "std",
+], optional = true, version = "0.244.0" }
+
+[build-dependencies]
+bindgen = { optional = true, version = "0.72.1" }
+cc = "1.2"
+
+[dev-dependencies]
+wasmparser = { default-features = false, features = [
+  "std",
+  "validate",
+  "features",
+], version = "0.244.0" }
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[lib]
+path = "binding_rust/lib.rs"
+
+[lints.rust]
+mismatched_lifetime_syntaxes = "allow"
