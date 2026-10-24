@@ -1,0 +1,84 @@
+---
+name: codeedit
+description: Use when reading or editing source code by structure instead of by line or regex — replacing a function or method body, inserting or deleting a definition, adding an import, renaming an identifier across files, bulk rewrites like `$E.unwrap()` to `$E?`, finding call sites, listing a file's definitions, or dumping a syntax tree as JSON. Covers Rust, Go, Python, TypeScript, JavaScript, JSX, TSX, Zig, Bash, JSON, YAML, XML, HTML and Markdown. Use instead of sed, awk or hand-counted line ranges.
+---
+
+# codeedit
+
+The `codeedit` CLI and the `treesitter` Python package (`import treesitter`), built on tree-sitter. Reads code as a syntax tree, edits it by symbol or pattern, and rejects any edit that is stale, overlapping, or adds syntax errors. Every editing command prints a unified diff; `-n` previews without writing, `--json` prints `{file, diff, edits, errors_before, errors_after}`.
+
+Language comes from the file extension; force it with `-l python`. Run `codeedit <command> --help` for flags.
+
+## Read
+
+```bash
+codeedit outline src/app.py               # definitions: name, path, kind, start/end [row,col], bytes, signature
+codeedit get src/app.py Greeter.greet     # one symbol with its full "text"
+codeedit parse src/lib.rs                 # tree as JSON; -f sexp|xml|dot
+cat x.json | codeedit parse - -l json -f sexp
+```
+
+Symbol paths: `Class.method`, Rust `impl Point` / `impl Display for Point` / `Point.new`, Go receiver methods `List.Push`. A bare name works when unique; an ambiguous one errors and lists candidates. A symbol includes its decorators, attributes, `export` and doc comments.
+
+## Edit one symbol
+
+```bash
+codeedit replace    src/app.py Greeter.greet --body -c 'return f"hi {self.name}"'
+codeedit replace    src/app.py helper --code-file new_helper.py     # whole definition
+codeedit insert     src/app.py Greeter.greet --position after -c 'def bye(self):
+    return "bye"'
+codeedit delete     src/app.py old_helper
+codeedit add-import src/app.py 'from pathlib import Path'           # no-op if present
+```
+
+Positions: `before`/`after` the symbol, `start`/`end` of its body. Write code unindented; it is reindented to fit.
+
+Several operations, all-or-nothing, as JSON:
+
+```bash
+codeedit edit - <<'EOF'
+[{"op": "replace_body", "file": "a.py", "symbol": "f", "code": "return 1"},
+ {"op": "insert", "file": "a.py", "symbol": "f", "position": "after", "code": "def g():\n    pass"},
+ {"op": "add_import", "file": "a.py", "import": "import os"}]
+EOF
+```
+
+Ops: `replace`, `replace_body`, `insert`, `delete`, `add_import`.
+
+## Bulk rewrite with patterns
+
+Write the pattern as code. `$A` matches one node, `$$$A` zero or more, `$_` / `$$$` match without binding. A name used twice must match the same text.
+
+```bash
+codeedit find    src -p 'print($$$ARGS)'                       # JSON matches with bindings
+codeedit rewrite src -p '$E.unwrap()' -r '$E?' -n
+codeedit rename  src --from old_name --to new_name             # by spelling, no type resolution
+```
+
+Rules file (`--rules FILE` or `-`) for constraints and multiple rules applied together:
+
+```json
+[{"pattern": "print($A)", "rewrite": "log($A)", "where": {"A": {"regex": "^msg", "kind": "identifier"}}},
+ {"pattern": "$X: $T = $V", "context": "class C:\n    $X: $T = $V",
+  "selector": "expression_statement", "rewrite": "$X: $T | None = $V"}]
+```
+
+Use `context` + `selector` when the pattern alone does not parse as the node you mean.
+
+## Raw tree-sitter queries and byte edits
+
+```bash
+codeedit query src -q '(call_expression function: (identifier) @f (#eq? @f "foo"))'
+codeedit rewrite-query src -q '(call function: (identifier) @f (#eq? @f "foo"))' -r 'f=bar'
+echo '[{"file": "a.py", "edits": [{"bytes": [10, 15], "expect": "hello", "replace": "world"}]}]' | codeedit apply -
+```
+
+Get byte ranges from `outline`, `get`, `find` or `parse`, and pass `expect` so a stale range is rejected.
+
+## Common mistakes
+
+- In zsh, `echo '...\n...'` turns `\n` into a real newline and breaks JSON. Use a heredoc or `printf '%s'`.
+- `rename` renames every identifier with that spelling, including unrelated ones. Preview with `-n`.
+- `outline`/`get` do not support JSON, YAML, XML, HTML or Markdown; use `query` or `parse` there.
+- Without `-l`, a directory walk skips files whose language the pattern does not parse in; it errors only if no language fits.
+- `--allow-errors` is for files that already have syntax errors, not for forcing a broken edit through.

@@ -1,12 +1,12 @@
 [package]
-name = "treesitter-cli"
+name = "codeedit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "treesitter"
+name = "codeedit"
 path = "src/main.rs"
 
 [lints]

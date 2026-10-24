@@ -10,7 +10,7 @@ use treesitter::tools::{self, Operation, Position, Request};
 use treesitter::{Format, Language, Rule};
 
 #[derive(Parser)]
-#[command(name = "treesitter", version, about = "Parse, query and edit code in any language")]
+#[command(name = "codeedit", version, about = "Parse, query and edit code in any language")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
