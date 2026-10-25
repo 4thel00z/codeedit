@@ -3,7 +3,7 @@
   "packages": {
     ".": {
       "release-type": "python",
-      "package-name": "treesitter",
+      "package-name": "codeedit",
       "include-component-in-tag": false,
       "pull-request-title-pattern": "chore: release ${version}",
       "extra-files": ["Cargo.toml"]

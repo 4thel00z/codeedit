@@ -5,7 +5,7 @@ description: Use when reading or editing source code by structure instead of by 
 
 # codeedit
 
-The `codeedit` CLI and the `treesitter` Python package (`import treesitter`), built on tree-sitter. Reads code as a syntax tree, edits it by symbol or pattern, and rejects any edit that is stale, overlapping, or adds syntax errors. Every editing command prints a unified diff; `-n` previews without writing, `--json` prints `{file, diff, edits, errors_before, errors_after}`.
+The `codeedit` CLI and the `codeedit` Python package (`import codeedit`), built on tree-sitter. Reads code as a syntax tree, edits it by symbol or pattern, and rejects any edit that is stale, overlapping, or adds syntax errors. Every editing command prints a unified diff; `-n` previews without writing, `--json` prints `{file, diff, edits, errors_before, errors_after}`.
 
 Language comes from the file extension; force it with `-l python` (`apply` and `edit` take a `"language"` key instead). Run `codeedit <command> --help` for flags. JSON input with an unknown key is rejected, so a typo cannot silently drop a check. CRLF files stay CRLF.
 

@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/4thel00z/codeedit/actions/workflows/ci.yml"><img src="https://github.com/4thel00z/codeedit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/4thel00z/codeedit/actions/workflows/release-please.yml"><img src="https://github.com/4thel00z/codeedit/actions/workflows/release-please.yml/badge.svg" alt="release"></a>
-  <a href="https://pypi.org/project/treesitter/"><img src="https://img.shields.io/pypi/v/treesitter?logo=pypi&logoColor=white" alt="PyPI"></a>
+  <a href="https://pypi.org/project/codeedit/"><img src="https://img.shields.io/pypi/v/codeedit?logo=pypi&logoColor=white" alt="PyPI"></a>
   <img src="https://img.shields.io/badge/python-3.13%2B-3776ab?logo=python&logoColor=white" alt="Python 3.13+">
   <img src="https://img.shields.io/badge/rust-2024-000000?logo=rust&logoColor=white" alt="Rust 2024">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
@@ -27,7 +27,7 @@
 
 ---
 
-Agents edit code with `sed` and hand-counted line ranges, and break it. codeedit parses the file with [tree-sitter](https://tree-sitter.github.io), finds code by symbol or by a pattern written as code, and applies the edit only if it is fresh, does not overlap another edit, and adds no syntax error. Every edit comes back as a unified diff. One Rust core sits behind the `codeedit` CLI and the `treesitter` Python package.
+Agents edit code with `sed` and hand-counted line ranges, and break it. codeedit parses the file with [tree-sitter](https://tree-sitter.github.io), finds code by symbol or by a pattern written as code, and applies the edit only if it is fresh, does not overlap another edit, and adds no syntax error. Every edit comes back as a unified diff. One Rust core sits behind the `codeedit` CLI and the `codeedit` Python package.
 
 ## Highlights
 
@@ -42,7 +42,7 @@ Agents edit code with `sed` and hand-counted line ranges, and break it. codeedit
 ## Install
 
 ```bash
-pip install treesitter                                          # Python package, abi3 wheels for 3.13+
+pip install codeedit                                            # Python package, abi3 wheels for 3.13+
 cargo install --git https://github.com/4thel00z/codeedit codeedit   # the `codeedit` binary
 ```
 
@@ -77,13 +77,13 @@ EOF
 ## Python
 
 ```python
-import treesitter
+import codeedit
 
-tree = treesitter.parse("def f(): return 1", "python")          # syntax tree as dicts
-treesitter.outline("src/app.py")                                # symbols
-treesitter.replace_body("src/app.py", "Greeter.greet", "return 'hi'")
-treesitter.rewrite("src", "$E.unwrap()", "$E?", dry_run=True)   # list of {file, diff, ...}
-change = treesitter.rewrite_source("foo(1)\n", "python", "foo($A)", "bar($A)")
+tree = codeedit.parse("def f(): return 1", "python")            # syntax tree as dicts
+codeedit.outline("src/app.py")                                  # symbols
+codeedit.replace_body("src/app.py", "Greeter.greet", "return 'hi'")
+codeedit.rewrite("src", "$E.unwrap()", "$E?", dry_run=True)     # list of {file, diff, ...}
+change = codeedit.rewrite_source("foo(1)\n", "python", "foo($A)", "bar($A)")
 ```
 
 ## Agent skill

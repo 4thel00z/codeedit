@@ -1,5 +1,5 @@
 [project]
-name = "treesitter"
+name = "codeedit"
 version = "0.1.0"
 description = "Parse code in any language, dump its syntax tree as JSON, and apply structured edits"
 license = "MIT"
@@ -15,7 +15,7 @@ build-backend = "maturin"
 
 [tool.maturin]
 manifest-path = "crates/python/Cargo.toml"
-module-name = "treesitter.native"
+module-name = "codeedit.native"
 python-source = "python"
 features = ["pyo3/extension-module"]
 

@@ -2,17 +2,17 @@ from pathlib import Path
 
 import pytest
 
-import treesitter
+import codeedit
 
 SAMPLE = 'class Greeter:\n    def greet(self, name: str) -> str:\n        return f"hi {name}"\n'
 
 
 def test_languages() -> None:
-    assert {"python", "rust", "go", "typescript", "tsx", "javascript", "zig", "bash", "json", "xml", "yaml", "markdown", "html"} <= set(treesitter.languages())
+    assert {"python", "rust", "go", "typescript", "tsx", "javascript", "zig", "bash", "json", "xml", "yaml", "markdown", "html"} <= set(codeedit.languages())
 
 
 def test_parse_returns_tree() -> None:
-    tree = treesitter.parse(SAMPLE, "python")
+    tree = codeedit.parse(SAMPLE, "python")
     method = tree["children"][0]["children"][1]["children"][0]
     assert tree["type"] == "module"
     assert method["type"] == "function_definition"
@@ -22,18 +22,18 @@ def test_parse_returns_tree() -> None:
 def test_parse_file_detects_language(tmp_path: Path) -> None:
     path = tmp_path / "main.go"
     path.write_text("package main\nfunc main() {}\n")
-    assert treesitter.parse_file(path)["type"] == "source_file"
+    assert codeedit.parse_file(path)["type"] == "source_file"
 
 
 def test_render_formats() -> None:
-    assert treesitter.render(SAMPLE.encode(), "python", "sexp").startswith("(module")
-    assert treesitter.render(SAMPLE.encode(), "python", "xml").startswith("<?xml")
+    assert codeedit.render(SAMPLE.encode(), "python", "sexp").startswith("(module")
+    assert codeedit.render(SAMPLE.encode(), "python", "xml").startswith("<?xml")
 
 
 def test_errors() -> None:
     with pytest.raises(ValueError, match="unknown language"):
-        treesitter.parse("x", "cobol")
+        codeedit.parse("x", "cobol")
     with pytest.raises(ValueError, match="cannot detect language"):
-        treesitter.parse_file("README")
+        codeedit.parse_file("README")
     with pytest.raises(OSError):
-        treesitter.parse_file("missing.py")
+        codeedit.parse_file("missing.py")

@@ -3,8 +3,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from os import PathLike, fspath
 from typing import Any
 
-from treesitter import native
-from treesitter.native import languages, render, render_file
+from codeedit import native
+from codeedit.native import languages, render, render_file
 
 __all__ = [
     "add_import",
