@@ -9,6 +9,7 @@ use crate::error::Error;
 use crate::format::text;
 use crate::language::Language;
 use crate::parse::parse;
+use crate::tools::{dedent, indent, indent_at};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Constraint {
@@ -151,7 +152,7 @@ fn first_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
 
 fn wrappers(language: Language) -> &'static [(&'static str, &'static str)] {
     match language {
-        Language::Rust => &[("", ""), ("fn µwrap() {\n", "\n}"), ("impl µWrap {\n", "\n}")],
+        Language::Rust => &[("", ""), ("fn µwrap() {\n", "\n}"), ("impl µWrap {\n", "\n}"), ("fn µwrap() { match µwrap {\n", "\n} }")],
         Language::Go => &[
             ("", ""),
             ("package µwrap\n", ""),
@@ -340,7 +341,7 @@ impl Matcher<'_, '_> {
 
     fn sequence(&mut self, expected: &[Node<'_>], actual: &[Node<'_>]) -> bool {
         let Some((first, rest)) = expected.split_first() else {
-            return actual.is_empty();
+            return actual.iter().all(|node| !node.is_named());
         };
         let checkpoint = self.bindings.len();
         if let Some(Variable::Multiple(name)) = variable(&self.pattern_text(*first), self.pattern.sigil) {
@@ -370,7 +371,10 @@ impl Matcher<'_, '_> {
             return true;
         }
         self.bindings.truncate(checkpoint);
-        false
+        if target.is_named() {
+            return false;
+        }
+        self.sequence(expected, remaining)
     }
 
     fn satisfied(&self) -> bool {
@@ -413,6 +417,11 @@ impl Matcher<'_, '_> {
 pub struct Planned<'found> {
     pub found: &'found Found,
     pub template: &'found str,
+}
+
+fn trailing_indent(text: &str) -> String {
+    let line = text.rsplit('\n').next().unwrap_or_default();
+    line.chars().take_while(|character| *character == ' ' || *character == '\t').collect()
 }
 
 struct Rewriter<'found> {
@@ -463,11 +472,12 @@ impl<'found> Rewriter<'found> {
                 rest = after;
                 continue;
             };
-            output.push_str(&self.render(binding.bytes, found.bytes));
+            let rendered = dedent(&self.render(binding.bytes, found.bytes), &indent_at(self.source, binding.bytes[0]));
+            output.push_str(&indent(&rendered, &trailing_indent(&output)));
             rest = tail;
         }
         output.push_str(rest);
-        output
+        indent(&output, &indent_at(self.source, found.bytes[0]))
     }
 }
 

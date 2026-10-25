@@ -18,7 +18,7 @@ codeedit parse src/lib.rs                 # tree as JSON; -f sexp|xml|dot
 cat x.json | codeedit parse - -l json -f sexp
 ```
 
-Symbol paths: `Class.method`, Rust `impl Point` / `impl Display for Point` / `Point.new`, Go receiver methods `List.Push`. A bare name works when unique; an ambiguous one errors and lists candidates. A symbol includes its decorators, attributes, `export` and doc comments.
+Symbol paths: `Class.method`, Rust `impl Point` / `impl Display for Point` / `Point.new`, Go receiver methods `List.Push`. A bare name works when unique; an ambiguous one errors and lists candidates. A symbol includes its decorators, attributes, `export` and doc comments. `get` returns `text` dedented to column 0, so it can be edited and passed back to `replace`; `bytes` is the exact range in the file.
 
 ## Edit one symbol
 
@@ -47,7 +47,7 @@ Ops: `replace`, `replace_body`, `insert`, `delete`, `add_import`.
 
 ## Bulk rewrite with patterns
 
-Write the pattern as code. `$A` matches one node, `$$$A` zero or more, `$_` / `$$$` match without binding. A name used twice must match the same text.
+Write the pattern as code. `$A` matches one node, `$$$A` zero or more, `$_` / `$$$` match without binding. A name used twice must match the same text. Every node in the pattern must match; punctuation in the code that the pattern leaves out (a trailing comma) is skipped. Write multi-line templates unindented: they take the indentation of the match, and multi-line bindings move with them. Whitespace inside a template is copied as written.
 
 ```bash
 codeedit find    src -p 'print($$$ARGS)'                       # JSON matches with bindings
@@ -63,7 +63,7 @@ Rules file (`--rules FILE` or `-`) for constraints and multiple rules applied to
   "selector": "expression_statement", "rewrite": "$X: $T | None = $V"}]
 ```
 
-Use `context` + `selector` when the pattern alone does not parse as the node you mean.
+Use `context` + `selector` when the pattern alone does not parse as the node you mean; the error says so. Rust match arms (`Command::Find { $$$A } => $B`) and impl items parse without it. A function pattern needs a block body: `fn $N($$$P) { $$$B }`, not `fn $N($$$P) $B`.
 
 ## Raw tree-sitter queries and byte edits
 

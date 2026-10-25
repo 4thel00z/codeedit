@@ -58,7 +58,7 @@ fn line_end(source: &str, position: usize) -> usize {
         .map_or(source.len(), |index| position + index)
 }
 
-fn indent_at(source: &str, position: usize) -> String {
+pub(crate) fn indent_at(source: &str, position: usize) -> String {
     let start = line_start(source, position);
     let line = source.get(start..line_end(source, start)).unwrap_or_default();
     line.chars().take_while(|character| *character == ' ' || *character == '\t').collect()
@@ -389,13 +389,36 @@ pub fn file_outline(path: &Path, language: Option<Language>) -> Result<Vec<Symbo
     outline(&tree, source.as_bytes(), language).map_err(|error| error.at(path))
 }
 
+pub(crate) fn dedent(text: &str, indent: &str) -> String {
+    text.split('\n')
+        .enumerate()
+        .map(|(index, line)| match index {
+            0 => line,
+            _ => line.strip_prefix(indent).unwrap_or(line),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(crate) fn indent(text: &str, prefix: &str) -> String {
+    text.split('\n')
+        .enumerate()
+        .map(|(index, line)| match index {
+            0 => line.to_owned(),
+            _ if line.trim().is_empty() => line.to_owned(),
+            _ => format!("{prefix}{line}"),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn get(path: &Path, language: Option<Language>, wanted: &str) -> Result<SymbolSource, Error> {
     let language = language.map_or_else(|| Language::from_path(path), Ok)?;
     let source = read(path)?;
     let tree = parse(source.as_bytes(), language)?;
     let symbols = outline(&tree, source.as_bytes(), language).map_err(|error| error.at(path))?;
     let symbol = lookup(&symbols, wanted).map_err(|error| error.at(path))?.clone();
-    let text = source.get(symbol.bytes[0]..symbol.bytes[1]).unwrap_or_default().to_owned();
+    let text = dedent(source.get(symbol.bytes[0]..symbol.bytes[1]).unwrap_or_default(), &indent_at(&source, symbol.bytes[0]));
     Ok(SymbolSource { symbol, text })
 }
 

@@ -21,7 +21,7 @@ def test_outline_and_get(module: Path) -> None:
         ("main", "function"),
     ]
     found = treesitter.get(module, "greet")
-    assert found["text"] == "def greet(self, name):\n        return name"
+    assert found["text"] == "def greet(self, name):\n    return name"
     assert found["signature"] == "def greet(self, name)"
 
 

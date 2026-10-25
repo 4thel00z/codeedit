@@ -1,7 +1,7 @@
 use std::fs;
 
 use treesitter::symbols::outline;
-use treesitter::tools::{Operation, Position, Request, operation_edits, rename, run};
+use treesitter::tools::{Operation, Position, Request, get, operation_edits, rename, run};
 use treesitter::{Error, Language, apply, parse};
 
 const PYTHON: &str = "import os\n\n\nclass Greeter:\n    @staticmethod\n    def greet(name):\n        return name\n\n    def wave(self):\n        pass\n\n\ndef main():\n    Greeter.greet(\"x\")\n";
@@ -124,6 +124,17 @@ fn lookup_errors() {
     let ambiguous = "class A:\n    def f(self): pass\nclass B:\n    def f(self): pass\n";
     assert!(matches!(edit(Language::Python, ambiguous, Operation::Delete { symbol: "f".into() }), Err(Error::Ambiguous { .. })));
     assert!(edit(Language::Python, ambiguous, Operation::Delete { symbol: "B.f".into() }).is_ok());
+}
+
+#[test]
+fn get_text_round_trips_through_replace() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("m.rs");
+    fs::write(&path, RUST).unwrap();
+    let symbol = get(&path, None, "Point.len").unwrap();
+    assert_eq!(symbol.text, "fn len(&self) -> i32 {\n    self.x\n}");
+    let operation = Operation::Replace { symbol: "Point.len".to_owned(), code: symbol.text };
+    assert_eq!(edit(Language::Rust, RUST, operation).unwrap(), RUST);
 }
 
 #[test]

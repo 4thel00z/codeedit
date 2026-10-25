@@ -44,6 +44,28 @@ fn operators_and_repeated_names_must_agree() {
 }
 
 #[test]
+fn rust_match_arms_need_no_context() {
+    let source = "fn f() {\n    match x {\n        A::B { y } => y,\n        A::C { z } => {\n            g(z);\n        }\n    }\n}\n";
+    let found = try_find(Language::Rust, &rule("$P { $$$F } => $B", None), source).unwrap();
+    let fields: Vec<&str> = found.iter().map(|each| each.bindings["F"].text.as_str()).collect();
+    assert_eq!(fields, ["y", "z"]);
+}
+
+#[test]
+fn multi_line_templates_take_the_match_indentation() {
+    let source = "class C:\n    def f(self):\n        print(x)\n";
+    let rewritten = try_rewrite(Language::Python, &rule("print($A)", Some("if debug:\n    print($A)")), source).unwrap();
+    assert_eq!(rewritten, "class C:\n    def f(self):\n        if debug:\n            print(x)\n");
+}
+
+#[test]
+fn multi_line_bindings_move_with_their_new_indentation() {
+    let source = "def f():\n    return g(\n        1,\n    )\n";
+    let rewritten = try_rewrite(Language::Python, &rule("return $E", Some("if ok:\n    return $E")), source).unwrap();
+    assert_eq!(rewritten, "def f():\n    if ok:\n        return g(\n            1,\n        )\n");
+}
+
+#[test]
 fn rewrites_nested_matches() {
     let source = "foo(foo(x), 2)\n";
     let result = try_rewrite(Language::Python, &rule("foo($$$A)", Some("bar($$$A)")), source).unwrap();
