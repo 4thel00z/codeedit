@@ -35,6 +35,7 @@ Agents edit code with `sed` and hand-counted line ranges, and break it. codeedit
 - **Edit by pattern**: `$E.unwrap()` → `$E?` across a directory; `$A` matches one node, `$$$A` any number, `where` filters by regex or node type.
 - **Safe by default**: stale, overlapping or syntax-breaking edits are rejected; multi-file changes are written all or nothing.
 - **Syntax tree as JSON**: every node with type, field, position, byte range and text; also S-expression, XML and Graphviz.
+- **Structure beyond code**: outlines and key edits for JSON and YAML, sections for Markdown, elements for HTML and XML; Markdown JSON dumps include inline nodes.
 - **Raw tree-sitter queries** when patterns are not enough.
 - **13 languages**: Rust, Go, Python, TypeScript, TSX, JavaScript/JSX, Zig, Bash, JSON, YAML, XML, HTML, Markdown.
 

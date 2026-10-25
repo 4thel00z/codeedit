@@ -244,8 +244,11 @@ fn trailing_comment(tree: &Tree, source: &str, position: usize) -> bool {
 
 fn owns_lines(tree: &Tree, source: &str, symbol: &Symbol) -> bool {
     let [start, end] = symbol.bytes;
-    let rest = [end, end_of_line(source, end).max(end)];
-    blank(source, [line_start(source, start), start]) && (blank(source, rest) || trailing_comment(tree, source, end))
+    let rest = source.get(end..end_of_line(source, end).max(end)).unwrap_or_default();
+    let after = rest.trim_start_matches([' ', '\t']);
+    let after = after.strip_prefix([',', ';']).unwrap_or(after);
+    let position = end + rest.len() - after.len();
+    blank(source, [line_start(source, start), start]) && (after.trim().is_empty() || trailing_comment(tree, source, position))
 }
 
 fn replace(symbol: &Symbol, source: &str, language: Language, code: &str) -> Edit {
@@ -442,18 +445,18 @@ fn delete_name(tree: &Tree, symbol: &Symbol, source: &str) -> Option<Vec<Edit>> 
     Some(edits)
 }
 
-fn delete_symbol(tree: &Tree, symbols: &[Symbol], wanted: &str, source: &str) -> Result<Vec<Edit>, Error> {
+fn delete_symbol(tree: &Tree, symbols: &[Symbol], wanted: &str, source: &str, language: Language) -> Result<Vec<Edit>, Error> {
     let refused = match sole(symbols, wanted) {
-        Ok(symbol) => return Ok(vec![delete(tree, symbol, source)]),
+        Ok(symbol) => return Ok(delete(tree, symbol, source, language)),
         Err(error) => error,
     };
     let symbol = lookup(symbols, wanted)?;
     delete_name(tree, symbol, source).ok_or(refused)
 }
 
-fn delete(tree: &Tree, symbol: &Symbol, source: &str) -> Edit {
+fn delete(tree: &Tree, symbol: &Symbol, source: &str, language: Language) -> Vec<Edit> {
     if !owns_lines(tree, source, symbol) {
-        return delete_inline(symbol, source);
+        return vec![delete_inline(symbol, source)];
     }
     let line = line_start(source, symbol.bytes[0]);
     let mut start = line;
@@ -472,11 +475,29 @@ fn delete(tree: &Tree, symbol: &Symbol, source: &str) -> Edit {
         }
         end = next;
     }
-    Edit {
+    let lines = Edit {
         bytes: [start, end],
         expect: source.get(start..end).map(str::to_owned),
         replace: String::new(),
-    }
+    };
+    let separated = source.get(symbol.bytes[1]..end).is_some_and(|rest| rest.contains(','));
+    let json = language == Language::Json;
+    let comma = source
+        .get(..start)
+        .map(|head| head.trim_end().len())
+        .and_then(|length| length.checked_sub(1))
+        .filter(|index| json && !separated && source.get(*index..*index + 1) == Some(","));
+    let Some(comma) = comma else {
+        return vec![lines];
+    };
+    vec![
+        Edit {
+            bytes: [comma, comma + 1],
+            expect: Some(",".to_owned()),
+            replace: String::new(),
+        },
+        lines,
+    ]
 }
 
 fn top_level<'tree>(tree: &'tree Tree, kinds: &[&str]) -> Vec<Node<'tree>> {
@@ -661,7 +682,7 @@ pub fn operation_edits(tree: &Tree, source: &str, language: Language, symbols: &
         Operation::Replace { symbol, code } => replace(sole(symbols, symbol)?, source, language, code),
         Operation::ReplaceBody { symbol, code } => replace_body(lookup(symbols, symbol)?, source, language, code)?,
         Operation::Insert { symbol, code, position } => insert(tree, lookup(symbols, symbol)?, source, language, code, *position)?,
-        Operation::Delete { symbol } => return delete_symbol(tree, symbols, symbol, source),
+        Operation::Delete { symbol } => return delete_symbol(tree, symbols, symbol, source, language),
         Operation::AddImport { import } => return Ok(add_import(tree, source, language, import)?.into_iter().collect()),
     };
     Ok(vec![edit])

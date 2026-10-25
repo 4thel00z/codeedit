@@ -69,6 +69,32 @@ const BASH: &str = r"
 (function_definition name: (word) @name) @definition.function
 ";
 
+const JSON: &str = r"
+(pair key: (string (string_content) @name)) @definition.key
+";
+
+const YAML: &str = r"
+(block_mapping_pair key: (flow_node) @name) @definition.key
+(flow_pair key: (flow_node) @name) @definition.key
+";
+
+const MARKDOWN: &str = r"
+(section . (atx_heading heading_content: (inline) @name)) @definition.section
+(section . (setext_heading (paragraph) @name)) @definition.section
+";
+
+const HTML: &str = r"
+(element (start_tag (tag_name) @name)) @definition.element
+(element (self_closing_tag (tag_name) @name)) @definition.element
+(script_element (start_tag (tag_name) @name)) @definition.element
+(style_element (start_tag (tag_name) @name)) @definition.element
+";
+
+const XML: &str = r"
+(element (STag (Name) @name)) @definition.element
+(element (EmptyElemTag (Name) @name)) @definition.element
+";
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Symbol {
     pub name: String,
@@ -82,23 +108,35 @@ pub struct Symbol {
     pub signature: String,
 }
 
-fn definitions(language: Language) -> Option<&'static str> {
+fn definitions(language: Language) -> &'static str {
     match language {
-        Language::Python => Some(PYTHON),
-        Language::Rust => Some(RUST),
-        Language::Go => Some(GO),
-        Language::JavaScript => Some(JAVASCRIPT),
-        Language::TypeScript | Language::Tsx => Some(TYPESCRIPT),
-        Language::Zig => Some(ZIG),
-        Language::Bash => Some(BASH),
-        _ => None,
+        Language::Python => PYTHON,
+        Language::Rust => RUST,
+        Language::Go => GO,
+        Language::JavaScript => JAVASCRIPT,
+        Language::TypeScript | Language::Tsx => TYPESCRIPT,
+        Language::Zig => ZIG,
+        Language::Bash => BASH,
+        Language::Json => JSON,
+        Language::Yaml => YAML,
+        Language::Markdown => MARKDOWN,
+        Language::Html => HTML,
+        Language::Xml => XML,
+    }
+}
+
+fn definition_body<'tree>(kind: &str, node: Node<'tree>) -> Option<Node<'tree>> {
+    match kind {
+        "constant" | "variable" | "section" | "element" => None,
+        "key" => node.child_by_field_name("value"),
+        _ => body(node, 3),
     }
 }
 
 fn query(language: Language) -> Result<&'static Query, Error> {
     static QUERIES: [OnceLock<Result<Query, String>>; Language::ALL.len()] = [const { OnceLock::new() }; Language::ALL.len()];
     let unsupported = || Error::Unsupported(format!("symbols are not available for {language}"));
-    let source = definitions(language).ok_or_else(unsupported)?;
+    let source = definitions(language);
     let index = Language::ALL.iter().position(|each| *each == language).ok_or_else(unsupported)?;
     let slot = QUERIES.get(index).ok_or_else(unsupported)?;
     let compiled = slot.get_or_init(|| Query::new(&language.grammar(), source).map_err(|error| error.to_string()));
@@ -198,7 +236,7 @@ fn body(node: Node<'_>, depth: usize) -> Option<Node<'_>> {
 }
 
 fn clean_name(kind: &str, raw: &str) -> String {
-    let trimmed = raw.trim_start_matches('*').trim_matches('"');
+    let trimmed = raw.trim().trim_start_matches('*').trim_matches('"');
     if !matches!(kind, "impl" | "method") {
         return trimmed.to_owned();
     }
@@ -264,7 +302,7 @@ pub fn outline(tree: &Tree, source: &[u8], language: Language) -> Result<Vec<Sym
             kind: kind.to_owned(),
             receiver,
             bytes,
-            body: (!matches!(kind, "constant" | "variable")).then(|| body(node, 3)).flatten().map(|body| [body.start_byte(), body.end_byte()]),
+            body: definition_body(kind, node).map(|body| [body.start_byte(), body.end_byte()]),
             start: [start.row, start.column],
             end: [end.row, end.column],
         });

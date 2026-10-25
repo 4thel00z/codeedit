@@ -41,7 +41,7 @@ fn outlines() {
     let zig = "const Point = struct {\n    pub fn len(self: Point) i32 { return 0; }\n};\npub fn main() void {}\n";
     assert_eq!(paths(Language::Zig, zig).unwrap(), pairs(&[("Point", "struct"), ("Point.len", "function"), ("main", "function")]));
     assert_eq!(paths(Language::Bash, "build() {\n  make\n}\n").unwrap(), pairs(&[("build", "function")]));
-    assert!(matches!(paths(Language::Json, "{}"), Err(Error::Unsupported(_))));
+    assert!(paths(Language::Json, "{}").unwrap().is_empty());
 }
 
 #[test]
@@ -396,4 +396,29 @@ fn trailing_comments_on_the_last_line_go_with_the_symbol() {
     let rust = "fn a() {}  // a\nfn b() {}\n";
     assert_eq!(batch(Language::Rust, rust, &[delete("a")]).unwrap(), "fn b() {}\n");
     assert_eq!(batch(Language::Rust, rust, &[insert("a", "fn c() {}", Position::After)]).unwrap(), "fn a() {}  // a\n\nfn c() {}\nfn b() {}\n");
+}
+
+#[test]
+fn data_and_markup_files_have_outlines() {
+    let json = "{\n  \"a\": {\n    \"b\": 1\n  },\n  \"c\": [1]\n}\n";
+    assert_eq!(paths(Language::Json, json).unwrap(), pairs(&[("a", "key"), ("a.b", "key"), ("c", "key")]));
+    let yaml = "a:\n  b: 1\nc: [1]\n";
+    assert_eq!(paths(Language::Yaml, yaml).unwrap(), pairs(&[("a", "key"), ("a.b", "key"), ("c", "key")]));
+    let markdown = "# Intro\n\ntext\n\n## Install\n\nrun it\n";
+    assert_eq!(paths(Language::Markdown, markdown).unwrap(), pairs(&[("Intro", "section"), ("Intro.Install", "section")]));
+    let html = "<div><p>hi</p></div>\n";
+    assert_eq!(paths(Language::Html, html).unwrap(), pairs(&[("div", "element"), ("div.p", "element")]));
+    let xml = "<a x=\"1\"><b>t</b><c/></a>\n";
+    assert_eq!(paths(Language::Xml, xml).unwrap(), pairs(&[("a", "element"), ("a.b", "element"), ("a.c", "element")]));
+}
+
+#[test]
+fn json_and_yaml_keys_can_be_edited() {
+    let json = "{\n  \"a\": {\n    \"b\": 1\n  },\n  \"c\": [1]\n}\n";
+    assert_eq!(batch(Language::Json, json, &[body("a.b", "2")]).unwrap(), "{\n  \"a\": {\n    \"b\": 2\n  },\n  \"c\": [1]\n}\n");
+    assert_eq!(batch(Language::Json, json, &[delete("c")]).unwrap(), "{\n  \"a\": {\n    \"b\": 1\n  }\n}\n");
+    assert_eq!(batch(Language::Json, json, &[delete("a")]).unwrap(), "{\n  \"c\": [1]\n}\n");
+    let yaml = "a:\n  b: 1\nc: [1]\n";
+    assert_eq!(batch(Language::Yaml, yaml, &[body("a.b", "2")]).unwrap(), "a:\n  b: 2\nc: [1]\n");
+    assert_eq!(batch(Language::Yaml, yaml, &[delete("a")]).unwrap(), "c: [1]\n");
 }

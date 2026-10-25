@@ -5,6 +5,7 @@ use std::str::FromStr;
 use tree_sitter::{Node, Point, Tree};
 
 use crate::error::Error;
+use crate::parse::parse_inline;
 use crate::walk::{Event, walk};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,41 +65,77 @@ fn closing(leaf: bool) -> &'static [u8] {
     b"]}"
 }
 
-pub fn write_json(tree: &Tree, source: &[u8], out: &mut impl Write) -> io::Result<()> {
-    let mut siblings: Vec<bool> = Vec::new();
+fn json_node(out: &mut impl Write, node: Node<'_>, field: Option<&str>) -> io::Result<()> {
+    out.write_all(b"{\"type\":")?;
+    json_string(out, node.kind())?;
+    if let Some(field) = field {
+        out.write_all(b",\"field\":")?;
+        json_string(out, field)?;
+    }
+    json_point(out, "start", node.start_position())?;
+    json_point(out, "end", node.end_position())?;
+    write!(out, ",\"bytes\":[{},{}]", node.start_byte(), node.end_byte())?;
+    if node.is_error() {
+        out.write_all(b",\"error\":true")?;
+    }
+    if node.is_missing() {
+        out.write_all(b",\"missing\":true")?;
+    }
+    Ok(())
+}
+
+fn inline_markdown(tree: &Tree, node: Node<'_>) -> bool {
+    node.kind() == "inline" && tree.language().name() == Some("markdown")
+}
+
+fn json_tree(tree: &Tree, source: &[u8], out: &mut impl Write, skip_root: bool) -> io::Result<()> {
+    let mut siblings: Vec<bool> = vec![false; usize::from(skip_root)];
+    let mut expanded: Vec<usize> = Vec::new();
+    let root = tree.root_node().id();
     walk(tree, |event| -> io::Result<()> {
         let Event::Enter { node, field, leaf } = event else {
+            let Event::Leave { node, leaf } = event else {
+                return Ok(());
+            };
+            if skip_root && node.id() == root {
+                return Ok(());
+            }
             siblings.pop();
-            return out.write_all(closing(matches!(event, Event::Leave { leaf: true, .. })));
+            let opened = expanded.last() == Some(&node.id());
+            if opened {
+                expanded.pop();
+            }
+            return out.write_all(closing(leaf && !opened));
         };
+        if skip_root && node.id() == root {
+            return Ok(());
+        }
         if let Some(seen) = siblings.last_mut() {
             if *seen {
                 out.write_all(b",")?;
             }
             *seen = true;
         }
-        out.write_all(b"{\"type\":")?;
-        json_string(out, node.kind())?;
-        if let Some(field) = field {
-            out.write_all(b",\"field\":")?;
-            json_string(out, field)?;
-        }
-        json_point(out, "start", node.start_position())?;
-        json_point(out, "end", node.end_position())?;
-        write!(out, ",\"bytes\":[{},{}]", node.start_byte(), node.end_byte())?;
-        if node.is_error() {
-            out.write_all(b",\"error\":true")?;
-        }
-        if node.is_missing() {
-            out.write_all(b",\"missing\":true")?;
-        }
+        json_node(out, node, field)?;
         siblings.push(false);
+        if leaf && inline_markdown(tree, node) {
+            let inline = parse_inline(source, node).map_err(io::Error::other)?;
+            expanded.push(node.id());
+            out.write_all(b",\"text\":")?;
+            json_string(out, &text(node, source))?;
+            out.write_all(b",\"children\":[")?;
+            return json_tree(&inline, source, out, true);
+        }
         if !leaf {
             return out.write_all(b",\"children\":[");
         }
         out.write_all(b",\"text\":")?;
         json_string(out, &text(node, source))
-    })?;
+    })
+}
+
+pub fn write_json(tree: &Tree, source: &[u8], out: &mut impl Write) -> io::Result<()> {
+    json_tree(tree, source, out, false)?;
     out.write_all(b"\n")
 }
 

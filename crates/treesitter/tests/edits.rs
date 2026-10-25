@@ -246,3 +246,14 @@ fn json_errors_with_only_tokens_keep_their_text() {
     let text = json.to_string();
     assert!(text.contains(r#""error":true"#) && text.contains(r#""text":"return )""#), "{text}");
 }
+
+#[test]
+fn markdown_json_includes_inline_nodes() {
+    let source = b"# Title\n\nsome *em* and [a link](http://x)\n";
+    let tree = parse(source, Language::Markdown).unwrap();
+    let json = treesitter::format::render(&tree, source, treesitter::Format::Json).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let text = value.to_string();
+    assert!(text.contains(r#""type":"emphasis""#) && text.contains(r#""type":"inline_link""#), "{text}");
+    assert!(text.contains(r#""bytes":[29,30]"#) || text.contains(r#""type":"link_text""#), "{text}");
+}
