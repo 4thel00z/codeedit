@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: cargo test (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --exclude treesitter-python --locked
+
+  pytest:
+    name: pytest (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+      - run: uv sync --locked
+      - run: uv run pytest -q
+
+  wheel:
+    name: wheel smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: PyO3/maturin-action@v1
+        with:
+          args: --release --out dist
+          manylinux: auto
+      - name: Import the wheel and edit a file
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install dist/*.whl
+          /tmp/venv/bin/python -c "
+          import treesitter
+          change = treesitter.rewrite_source('foo(1)\n', 'python', 'foo(\$A)', 'bar(\$A)')
+          assert change['source'] == 'bar(1)\n', change
+          print('ok', len(treesitter.languages()), 'languages')
+          "
+
+  binary:
+    name: codeedit smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p codeedit
+      - name: Run the skill's core commands
+        run: |
+          bin="$CARGO_TARGET_DIR"
+          bin="${bin:-target}/release/codeedit"
+          printf 'def f():\n    return 1\n' > /tmp/m.py
+          "$bin" outline /tmp/m.py | grep -q '"path":"f"'
+          "$bin" replace /tmp/m.py f --body -c 'return 2'
+          grep -q 'return 2' /tmp/m.py
+          "$bin" rewrite /tmp/m.py -p 'return $X' -r 'return $X + 1'
+          grep -q 'return 2 + 1' /tmp/m.py

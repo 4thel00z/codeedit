@@ -1,0 +1,39 @@
+<svg width="240" height="240" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="codeedit logo">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#161b2e"/>
+      <stop offset="1" stop-color="#0b0f1a"/>
+    </linearGradient>
+    <linearGradient id="bracket" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff8a3d" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#ff8a3d" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="6" y="6" width="188" height="188" rx="44" fill="url(#tile)"/>
+  <rect x="6.5" y="6.5" width="187" height="187" rx="43.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+  <g fill="none" stroke="url(#bracket)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="52,64 26,100 52,136"/>
+    <polyline points="148,64 174,100 148,136"/>
+  </g>
+  <g stroke="#94a3b8" stroke-width="5" stroke-linecap="round">
+    <line x1="100" y1="58" x2="78" y2="98"/>
+    <line x1="100" y1="58" x2="122" y2="98"/>
+    <line x1="78" y1="98" x2="66" y2="140"/>
+    <line x1="78" y1="98" x2="92" y2="140"/>
+  </g>
+  <line x1="122" y1="98" x2="120" y2="140" stroke="#ff8a3d" stroke-width="5" stroke-linecap="round"/>
+  <g fill="#e2e8f0">
+    <circle cx="100" cy="58" r="11"/>
+    <circle cx="78" cy="98" r="9"/>
+    <circle cx="122" cy="98" r="9"/>
+    <circle cx="66" cy="140" r="8"/>
+    <circle cx="92" cy="140" r="8"/>
+  </g>
+  <circle cx="120" cy="142" r="26" fill="url(#glow)"/>
+  <rect x="107" y="129" width="26" height="26" rx="7" fill="#ff8a3d" transform="rotate(45 120 142)"/>
+  <rect x="114.5" y="136.5" width="11" height="11" rx="2.5" fill="#fff4e6" transform="rotate(45 120 142)"/>
+</svg>

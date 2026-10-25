@@ -1,0 +1,162 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+      prs_created: ${{ steps.rp.outputs.prs_created }}
+      pr: ${{ steps.rp.outputs.pr }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  sync-lockfile:
+    needs: release-please
+    if: needs.release-please.outputs.prs_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - run: cargo update --workspace
+      - run: uv lock
+      - name: Commit the lockfiles to the release PR
+        env:
+          BRANCH: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+        run: |
+          if git diff --quiet -- Cargo.lock uv.lock; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: sync lockfiles with release version"
+          git push origin "HEAD:${BRANCH}"
+
+  binaries:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    name: codeedit (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { runner: macos-latest, target: aarch64-apple-darwin }
+          - { runner: macos-latest, target: x86_64-apple-darwin }
+          - { runner: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked -p codeedit --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          name="codeedit-${TAG}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp LICENSE README.md "dist/$name/"
+          cp target/${{ matrix.target }}/release/codeedit* "dist/$name/" 2>/dev/null || true
+          rm -f "dist/$name"/*.d "dist/$name"/*.pdb
+          cd dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$name.zip" "$name" >/dev/null
+            sha256sum "$name.zip" > "$name.zip.sha256"
+          else
+            tar czf "$name.tar.gz" "$name"
+            shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+          fi
+          rm -rf "$name"
+      - name: Attach to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release upload "$TAG" dist/* --clobber
+
+  wheels:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
+    name: wheel (${{ matrix.platform.runner }} ${{ matrix.platform.target }})
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { runner: ubuntu-latest, target: x86_64 }
+          - { runner: ubuntu-24.04-arm, target: aarch64 }
+          - { runner: macos-latest, target: aarch64 }
+          - { runner: macos-latest, target: x86_64 }
+          - { runner: windows-latest, target: x64 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          manylinux: auto
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ runner.os }}-${{ matrix.platform.target }}
+          path: dist
+
+  sdist:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-sdist
+          path: dist
+
+  publish-pypi:
+    needs: [release-please, wheels, sdist]
+    if: needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v8
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: wheels-*/*
+      - name: Collect distributions
+        run: |
+          mkdir -p dist
+          cp wheels-*/* dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
