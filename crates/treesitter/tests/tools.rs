@@ -107,7 +107,7 @@ fn add_imports() {
     let typescript = edit(Language::TypeScript, TYPESCRIPT, Operation::AddImport { import: "import { b } from \"b\";".into() }).unwrap();
     assert!(typescript.starts_with("import { a } from \"a\";\nimport { b } from \"b\";\n"), "{typescript}");
     let fresh = edit(Language::Python, "\"\"\"Doc.\"\"\"\nx = 1\n", Operation::AddImport { import: "import os".into() }).unwrap();
-    assert_eq!(fresh, "\"\"\"Doc.\"\"\"\n\nimport os\nx = 1\n");
+    assert_eq!(fresh, "\"\"\"Doc.\"\"\"\n\nimport os\n\nx = 1\n");
 }
 
 #[test]
@@ -287,12 +287,12 @@ fn imports_go_after_file_level_comments() {
     let rust = "//! Small CLI.\nfn main() {\n    let s = String::new();\n}\n";
     assert_eq!(
         batch(Language::Rust, rust, &[import("use std::io;")]).unwrap(),
-        "//! Small CLI.\n\nuse std::io;\nfn main() {\n    let s = String::new();\n}\n"
+        "//! Small CLI.\n\nuse std::io;\n\nfn main() {\n    let s = String::new();\n}\n"
     );
     let javascript = "#!/usr/bin/env node\nrun();\n";
     assert_eq!(
         batch(Language::JavaScript, javascript, &[import("import fs from \"fs\";")]).unwrap(),
-        "#!/usr/bin/env node\n\nimport fs from \"fs\";\nrun();\n"
+        "#!/usr/bin/env node\n\nimport fs from \"fs\";\n\nrun();\n"
     );
 }
 
@@ -350,7 +350,7 @@ fn multi_name_declarations_keep_their_siblings() {
     assert_eq!(batch(Language::JavaScript, javascript, &[delete("a")]).unwrap(), "const b = () => 2;\nb();\n");
     let go = "package m\n\nvar x, y = 1, 2\n";
     assert_eq!(paths(Language::Go, go).unwrap(), pairs(&[("x", "variable"), ("y", "variable")]));
-    assert!(matches!(batch(Language::Go, go, &[delete("x")]), Err(Error::Conflict(_))));
+    assert!(batch(Language::Go, go, &[delete("x")]).unwrap() == "package m\n\nvar y = 2\n");
 }
 
 #[test]
@@ -365,6 +365,24 @@ fn computed_method_names_and_constant_values() {
 fn symbol_edits_work_in_files_broken_elsewhere() {
     let broken = "def f(:\n    pass\n\n\ndef g():\n    return 1\n";
     assert_eq!(batch(Language::Python, broken, &[body("g", "return 2")]).unwrap(), "def f(:\n    pass\n\n\ndef g():\n    return 2\n");
+}
+
+#[test]
+fn one_name_of_a_go_declaration_can_be_deleted() {
+    let go = "package m\n\nvar x, y = 1, 2\n";
+    assert_eq!(batch(Language::Go, go, &[delete("x")]).unwrap(), "package m\n\nvar y = 2\n");
+    assert_eq!(batch(Language::Go, go, &[delete("y")]).unwrap(), "package m\n\nvar x = 1\n");
+    let typed = "package m\n\nvar a, b, c int\n";
+    assert_eq!(batch(Language::Go, typed, &[delete("b")]).unwrap(), "package m\n\nvar a, c int\n");
+    assert!(matches!(batch(Language::Go, go, &[Operation::Replace { symbol: "x".to_owned(), code: "var x = 3".to_owned() }]), Err(Error::Conflict(_))));
+}
+
+#[test]
+fn python_imports_keep_two_blank_lines_before_definitions() {
+    let python = "class A:\n    pass\n";
+    assert_eq!(batch(Language::Python, python, &[import("import os")]).unwrap(), "import os\n\n\nclass A:\n    pass\n");
+    let script = "x = 1\n";
+    assert_eq!(batch(Language::Python, script, &[import("import os")]).unwrap(), "import os\n\nx = 1\n");
 }
 
 #[test]

@@ -530,7 +530,7 @@ pub struct Planned<'found> {
     pub template: &'found str,
 }
 
-fn trailing_indent(text: &str) -> String {
+pub(crate) fn trailing_indent(text: &str) -> String {
     let line = text.rsplit('\n').next().unwrap_or_default();
     line.chars().take_while(|character| *character == ' ' || *character == '\t').collect()
 }

@@ -79,7 +79,7 @@ fn repeated_captures_keep_their_own_text() {
     let tree = parse(source.as_bytes(), Language::Python).unwrap();
     let found = matches(&query, &tree, source.as_bytes());
     let replacements = BTreeMap::from([("dec".to_owned(), "@dec  # audited".to_owned())]);
-    let change = apply(source, Language::Python, &treesitter::rewrite::edits(&found, &replacements), "m.py", false).unwrap();
+    let change = apply(source, Language::Python, &treesitter::rewrite::edits(&found, &replacements, source, Language::Python), "m.py", false).unwrap();
     assert_eq!(change.source, "@cache  # audited\n@trace  # audited\ndef f():\n    pass\n");
 }
 
@@ -90,8 +90,20 @@ fn capture_names_stop_at_the_longest_capture() {
     let tree = parse(source.as_bytes(), Language::Python).unwrap();
     let found = matches(&query, &tree, source.as_bytes());
     let replacements = BTreeMap::from([("x".to_owned(), "@x.value".to_owned())]);
-    let change = apply(source, Language::Python, &treesitter::rewrite::edits(&found, &replacements), "m.py", false).unwrap();
+    let change = apply(source, Language::Python, &treesitter::rewrite::edits(&found, &replacements, source, Language::Python), "m.py", false).unwrap();
     assert_eq!(change.source, "x.value = 1\n");
+}
+
+#[test]
+fn query_templates_take_the_capture_indentation() {
+    let source = "def f():\n    if x:\n        g()\n";
+    let query = compile(Language::Python, "(call) @c").unwrap();
+    let tree = parse(source.as_bytes(), Language::Python).unwrap();
+    let found = matches(&query, &tree, source.as_bytes());
+    let replacements = BTreeMap::from([("c".to_owned(), "try:\n    @c\nexcept E:\n    pass".to_owned())]);
+    let edits = treesitter::rewrite::edits(&found, &replacements, source, Language::Python);
+    let change = apply(source, Language::Python, &edits, "m.py", false).unwrap();
+    assert_eq!(change.source, "def f():\n    if x:\n        try:\n            g()\n        except E:\n            pass\n");
 }
 
 #[test]

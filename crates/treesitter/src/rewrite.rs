@@ -4,7 +4,10 @@ use tree_sitter::Query;
 
 use crate::edit::Edit;
 use crate::error::Error;
+use crate::language::Language;
+use crate::pattern::trailing_indent;
 use crate::query::{Capture, Match};
+use crate::tools::{dedent, indent, indent_at};
 
 pub fn validate(query: &Query, replacements: &BTreeMap<String, String>) -> Result<(), Error> {
     let names = query.capture_names();
@@ -29,7 +32,12 @@ fn resolve<'found>(found: &'found Match, current: &'found Capture, name: &str) -
     found.capture(name)
 }
 
-pub fn expand(template: &str, found: &Match, current: &Capture) -> String {
+pub struct Context<'source> {
+    pub source: &'source str,
+    pub language: Language,
+}
+
+pub fn expand(template: &str, found: &Match, current: &Capture, context: &Context<'_>) -> String {
     let mut output = String::with_capacity(template.len());
     let mut rest = template;
     while let Some((head, after)) = rest.split_once('@') {
@@ -44,17 +52,20 @@ pub fn expand(template: &str, found: &Match, current: &Capture) -> String {
             rest = after;
             continue;
         };
-        output.push_str(&capture.text);
+        let moved = dedent(&capture.text, &indent_at(context.source, capture.bytes[0]), context.language);
+        output.push_str(&indent(&moved, &trailing_indent(&output), context.language));
         rest = tail;
     }
     output.push_str(rest);
-    output
+    indent(&output, &indent_at(context.source, current.bytes[0]), context.language)
 }
 
-pub fn edits(found: &[Match], replacements: &BTreeMap<String, String>) -> Vec<Edit> {
+pub fn edits(found: &[Match], replacements: &BTreeMap<String, String>, source: &str, language: Language) -> Vec<Edit> {
+    let context = Context { source, language };
     found
         .iter()
         .flat_map(|each| {
+            let context = &context;
             replacements.iter().flat_map(move |(name, template)| {
                 let name = name.trim_start_matches('@');
                 each.captures
@@ -63,7 +74,7 @@ pub fn edits(found: &[Match], replacements: &BTreeMap<String, String>) -> Vec<Ed
                     .map(move |capture| Edit {
                         bytes: capture.bytes,
                         expect: Some(capture.text.clone()),
-                        replace: expand(template, each, capture),
+                        replace: expand(template, each, capture, context),
                     })
             })
         })

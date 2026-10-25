@@ -262,7 +262,7 @@ pub fn rewrite_query(
             let Some((source, found)) = search(target, query)? else {
                 return Ok(None);
             };
-            changed(target, &source, &rewrite::edits(&found, replacements), allow_errors)
+            changed(target, &source, &rewrite::edits(&found, replacements, &source, target.language), allow_errors)
         })
         .collect();
     finish(results, dry_run)

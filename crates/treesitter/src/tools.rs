@@ -11,6 +11,7 @@ use crate::files::{FileChange, agreed, canonical, changed, collect, commit, fini
 use crate::language::Language;
 use crate::parse::parse;
 use crate::symbols::{Symbol, lookup, outline};
+use crate::walk::preorder;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -408,6 +409,59 @@ fn delete_inline(symbol: &Symbol, source: &str) -> Edit {
     }
 }
 
+fn listed<'tree>(node: Node<'tree>, field: &str) -> Vec<Node<'tree>> {
+    let mut cursor = node.walk();
+    node.children_by_field_name(field, &mut cursor).collect()
+}
+
+fn drop_item(items: &[Node<'_>], index: usize, source: &str) -> Option<Edit> {
+    let item = items.get(index)?;
+    let previous = index.checked_sub(1).and_then(|before| items.get(before));
+    let [start, end] = match (items.get(index + 1), previous) {
+        (Some(next), _) => [item.start_byte(), next.start_byte()],
+        (None, Some(previous)) => [previous.end_byte(), item.end_byte()],
+        (None, None) => return None,
+    };
+    Some(Edit {
+        bytes: [start, end],
+        expect: source.get(start..end).map(str::to_owned),
+        replace: String::new(),
+    })
+}
+
+fn delete_name(tree: &Tree, symbol: &Symbol, source: &str) -> Option<Vec<Edit>> {
+    let declaration = tree.root_node().descendant_for_byte_range(symbol.bytes[0], symbol.bytes[1])?;
+    let mut spec = None;
+    preorder(declaration, |node| {
+        if matches!(node.kind(), "var_spec" | "const_spec") {
+            spec = spec.or(Some(node));
+        }
+        spec.is_none()
+    });
+    let spec = spec?;
+    let names = listed(spec, "name");
+    let index = names.iter().position(|name| source.get(name.byte_range()) == Some(symbol.name.as_str()))?;
+    let mut edits = vec![drop_item(&names, index, source)?];
+    let values: Vec<Node<'_>> = spec
+        .child_by_field_name("value")
+        .map(|list| {
+            let mut cursor = list.walk();
+            list.named_children(&mut cursor).collect()
+        })
+        .unwrap_or_default();
+    edits.extend(drop_item(&values, index, source));
+    Some(edits)
+}
+
+fn delete_symbol(tree: &Tree, symbols: &[Symbol], wanted: &str, source: &str) -> Result<Vec<Edit>, Error> {
+    let refused = match sole(symbols, wanted) {
+        Ok(symbol) => return Ok(vec![delete(tree, symbol, source)]),
+        Err(error) => error,
+    };
+    let symbol = lookup(symbols, wanted)?;
+    delete_name(tree, symbol, source).ok_or(refused)
+}
+
 fn delete(tree: &Tree, symbol: &Symbol, source: &str) -> Edit {
     if !owns_lines(tree, source, symbol) {
         return delete_inline(symbol, source);
@@ -472,11 +526,33 @@ fn after_last(nodes: &[Node<'_>], source: &str, import: &str) -> Option<Edit> {
     Some(insertion(end_of_line(source, last.end_byte()), format!("\n{import}")))
 }
 
-fn at_top(position: usize, import: &str) -> Edit {
-    if position == 0 {
-        return insertion(0, format!("{import}\n\n"));
+fn blank_lines_after(source: &str, position: usize) -> usize {
+    let mut count = 0;
+    let mut line = next_line(source, position);
+    while line < source.len() && blank(source, [line, line_end(source, line)]) {
+        count += 1;
+        line = next_line(source, line);
     }
-    insertion(position, format!("\n\n{import}"))
+    count
+}
+
+fn definitions_follow(tree: &Tree, language: Language, position: usize) -> bool {
+    let root = tree.root_node();
+    let mut cursor = root.walk();
+    let next = root
+        .named_children(&mut cursor)
+        .find(|node| node.start_byte() >= position && node.kind() != "comment");
+    language == Language::Python
+        && next.is_some_and(|node| matches!(node.kind(), "function_definition" | "class_definition" | "decorated_definition"))
+}
+
+fn at_top(tree: &Tree, source: &str, language: Language, position: usize, import: &str) -> Edit {
+    let wanted = 1 + usize::from(definitions_follow(tree, language, position));
+    if position == 0 {
+        return insertion(0, format!("{import}\n{}", "\n".repeat(wanted)));
+    }
+    let missing = wanted.saturating_sub(blank_lines_after(source, position));
+    insertion(position, format!("\n\n{import}{}", "\n".repeat(missing)))
 }
 
 fn go_spec(import: &str) -> String {
@@ -542,7 +618,7 @@ fn add_go_import(tree: &Tree, source: &str, import: &str) -> Option<Edit> {
     }
     let package = top_level(tree, &["package_clause"]);
     let position = package.first().map_or(0, |node| end_of_line(source, node.end_byte()));
-    Some(at_top(position, &format!("import {spec}")))
+    Some(at_top(tree, source, Language::Go, position, &format!("import {spec}")))
 }
 
 fn zig_imports<'tree>(tree: &'tree Tree, source: &str) -> Vec<Node<'tree>> {
@@ -571,7 +647,7 @@ pub fn add_import(tree: &Tree, source: &str, language: Language, import: &str) -
     if let Some(edit) = after_last(&imports, source, import) {
         return Ok(Some(edit));
     }
-    Ok(Some(at_top(preamble_end(tree, source, preamble), import)))
+    Ok(Some(at_top(tree, source, language, preamble_end(tree, source, preamble), import)))
 }
 
 fn sole<'symbols>(symbols: &'symbols [Symbol], wanted: &str) -> Result<&'symbols Symbol, Error> {
@@ -596,7 +672,7 @@ pub fn operation_edits(tree: &Tree, source: &str, language: Language, symbols: &
         Operation::Replace { symbol, code } => replace(sole(symbols, symbol)?, source, language, code),
         Operation::ReplaceBody { symbol, code } => replace_body(lookup(symbols, symbol)?, source, language, code)?,
         Operation::Insert { symbol, code, position } => insert(tree, lookup(symbols, symbol)?, source, language, code, *position)?,
-        Operation::Delete { symbol } => delete(tree, sole(symbols, symbol)?, source),
+        Operation::Delete { symbol } => return delete_symbol(tree, symbols, symbol, source),
         Operation::AddImport { import } => return Ok(add_import(tree, source, language, import)?.into_iter().collect()),
     };
     Ok(vec![edit])
