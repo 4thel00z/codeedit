@@ -109,7 +109,8 @@ fn labels(label: &str) -> (String, String) {
     if label.starts_with('/') {
         return (label.to_owned(), label.to_owned());
     }
-    (format!("a/{label}"), format!("b/{label}"))
+    let relative = label.trim_start_matches("./");
+    (format!("a/{relative}"), format!("b/{relative}"))
 }
 
 pub fn apply(source: &str, language: Language, edits: &[Edit], label: &str, allow_errors: bool) -> Result<Change, Error> {

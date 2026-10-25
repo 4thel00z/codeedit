@@ -24,6 +24,12 @@ fn apply_replaces_and_diffs() {
 }
 
 #[test]
+fn diff_labels_drop_a_leading_dot_slash() {
+    let change = apply(PYTHON, Language::Python, &[edit(4, 7, None, "baz")], "./m.py", false).unwrap();
+    assert!(change.diff.starts_with("--- a/m.py\n+++ b/m.py\n"), "{}", change.diff);
+}
+
+#[test]
 fn apply_handles_many_edits_in_any_order() {
     let edits = [edit(23, 26, None, "qux"), edit(4, 7, None, "qux"), edit(0, 0, None, "# head\n")];
     let change = apply(PYTHON, Language::Python, &edits, "m.py", false).unwrap();

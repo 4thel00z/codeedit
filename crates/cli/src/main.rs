@@ -346,6 +346,9 @@ fn run(cli: Cli) -> Result<()> {
             report(&changes, &options, &mut out)?;
         }
         Command::Find { paths, rules, lang } => {
+            if rules.rewrite.is_some() {
+                bail!("find does not rewrite; use `codeedit rewrite`");
+            }
             let found = files::find(&paths, optional_language(lang.as_deref())?, &rules.load()?)?;
             serde_json::to_writer(&mut out, &found)?;
             writeln!(out)?;
