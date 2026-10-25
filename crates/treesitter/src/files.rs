@@ -347,7 +347,7 @@ pub fn rewrite(
                     })
                 })
                 .collect();
-            changed(target, &source, &pattern::edits(&planned, &source), allow_errors)
+            changed(target, &source, &pattern::edits(&planned, &source)?, allow_errors)
         })
         .collect();
     finish(results, dry_run)

@@ -73,6 +73,28 @@ fn query_returns_captures() {
 }
 
 #[test]
+fn repeated_captures_keep_their_own_text() {
+    let source = "@cache\n@trace\ndef f():\n    pass\n";
+    let query = compile(Language::Python, "(decorated_definition (decorator)+ @dec definition: (function_definition))").unwrap();
+    let tree = parse(source.as_bytes(), Language::Python).unwrap();
+    let found = matches(&query, &tree, source.as_bytes());
+    let replacements = BTreeMap::from([("dec".to_owned(), "@dec  # audited".to_owned())]);
+    let change = apply(source, Language::Python, &treesitter::rewrite::edits(&found, &replacements), "m.py", false).unwrap();
+    assert_eq!(change.source, "@cache  # audited\n@trace  # audited\ndef f():\n    pass\n");
+}
+
+#[test]
+fn capture_names_stop_at_the_longest_capture() {
+    let source = "x = 1\n";
+    let query = compile(Language::Python, "(identifier) @x").unwrap();
+    let tree = parse(source.as_bytes(), Language::Python).unwrap();
+    let found = matches(&query, &tree, source.as_bytes());
+    let replacements = BTreeMap::from([("x".to_owned(), "@x.value".to_owned())]);
+    let change = apply(source, Language::Python, &treesitter::rewrite::edits(&found, &replacements), "m.py", false).unwrap();
+    assert_eq!(change.source, "x.value = 1\n");
+}
+
+#[test]
 fn rewrite_query_across_a_directory() {
     let directory = tempfile::tempdir().unwrap();
     let python = directory.path().join("a.py");

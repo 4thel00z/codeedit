@@ -20,7 +20,7 @@ fn try_find(language: Language, rule: &Rule, source: &str) -> Result<Vec<Found>,
 
 fn try_rewrite(language: Language, rule: &Rule, source: &str) -> Result<String, Error> {
     let found = try_find(language, rule, source)?;
-    let edits = edits(&plan(&found, rule.rewrite.as_deref().ok_or(Error::MissingRewrite)?), source);
+    let edits = edits(&plan(&found, rule.rewrite.as_deref().ok_or(Error::MissingRewrite)?), source)?;
     Ok(apply(source, language, &edits, "x", false)?.source)
 }
 
@@ -185,4 +185,75 @@ fn mixed_language_directories_skip_languages_the_pattern_does_not_fit() {
     assert!(matches!(nothing, Err(Error::Pattern(_))));
     let explicit = treesitter::files::find(&[directory.path().join("d.py")], None, &[rule("print($$$A)", None)]);
     assert!(explicit.is_err());
+}
+
+#[test]
+fn context_must_contain_the_pattern() {
+    let mut missing = rule("baz(z)", Some("qux(z)"));
+    missing.context = Some("foo(x)\nbar(y)\n".to_owned());
+    assert!(matches!(Pattern::new(&missing, Language::Python), Err(Error::Pattern(_))));
+}
+
+#[test]
+fn selector_picks_the_node_around_the_pattern() {
+    let mut selected = rule("x: str", Some("x: bytes"));
+    selected.context = Some("class A:\n    y: int = 0\n    x: str\n".to_owned());
+    selected.selector = Some("assignment".to_owned());
+    let rewritten = try_rewrite(Language::Python, &selected, "class B:\n    y: int = 0\n    x: str\n").unwrap();
+    assert_eq!(rewritten, "class B:\n    y: int = 0\n    x: bytes\n");
+}
+
+#[test]
+fn constraints_are_checked_while_backtracking() {
+    let mut constrained = rule("foo($$$A, $X, $$$B)", None);
+    constrained.constraints = BTreeMap::from([("X".to_owned(), Constraint { regex: Some("^3$".to_owned()), kind: None })]);
+    let found = try_find(Language::Python, &constrained, "foo(1, 2, 3, 4)\n").unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].bindings["X"].text, "3");
+}
+
+#[test]
+fn constraints_must_name_a_metavariable() {
+    let mut unknown = rule("foo($A)", None);
+    unknown.constraints = BTreeMap::from([("B".to_owned(), Constraint { regex: Some("x".to_owned()), kind: None })]);
+    assert!(matches!(Pattern::new(&unknown, Language::Python), Err(Error::Pattern(_))));
+}
+
+#[test]
+fn kind_constraints_accept_supertypes() {
+    let mut expression = rule("foo($A)", None);
+    expression.constraints = BTreeMap::from([("A".to_owned(), Constraint { regex: None, kind: Some("expression".to_owned()) })]);
+    let found = try_find(Language::Python, &expression, "foo(a + b)\nfoo(x=1)\n").unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].bindings["A"].text, "a + b");
+}
+
+#[test]
+fn template_names_stop_at_the_longest_binding() {
+    let rewritten = try_rewrite(Language::Python, &rule("foo($NAME)", Some("foo($NAME_v2)")), "foo(x)\n").unwrap();
+    assert_eq!(rewritten, "foo(x_v2)\n");
+}
+
+#[test]
+fn escaped_dollar_is_literal_in_bash() {
+    let source = "cd $HOME\ncd /tmp\n";
+    let literal = try_find(Language::Bash, &rule("cd \\$HOME", None), source).unwrap();
+    assert_eq!(literal.len(), 1);
+    assert_eq!(literal[0].text, "cd $HOME");
+    let bound = try_find(Language::Bash, &rule("cd $DIR", None), source).unwrap();
+    assert_eq!(bound.len(), 2);
+}
+
+#[test]
+fn empty_trailing_multiple_binds_where_it_would_be() {
+    let source = "def f():\n    return 1\n";
+    let found = try_find(Language::Python, &rule("def $F():\n    return 1\n    $$$REST", None), source).unwrap();
+    assert_eq!(found[0].bindings["REST"].bytes, [21, 21]);
+}
+
+#[test]
+fn deeply_nested_rewrites_fail_instead_of_crashing() {
+    let source = format!("x = {}\n", vec!["a"; 20_000].join(" + "));
+    let found = try_find(Language::Python, &rule("$A + $B", None), &source).unwrap();
+    assert!(edits(&plan(&found, "add($A, $B)"), &source).is_err());
 }

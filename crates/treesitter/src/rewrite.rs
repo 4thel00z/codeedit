@@ -4,7 +4,7 @@ use tree_sitter::Query;
 
 use crate::edit::Edit;
 use crate::error::Error;
-use crate::query::Match;
+use crate::query::{Capture, Match};
 
 pub fn validate(query: &Query, replacements: &BTreeMap<String, String>) -> Result<(), Error> {
     let names = query.capture_names();
@@ -22,15 +22,24 @@ fn capture_name(character: char) -> bool {
     character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '-')
 }
 
-pub fn expand(template: &str, found: &Match) -> String {
+fn resolve<'found>(found: &'found Match, current: &'found Capture, name: &str) -> Option<&'found Capture> {
+    if current.name == name {
+        return Some(current);
+    }
+    found.capture(name)
+}
+
+pub fn expand(template: &str, found: &Match, current: &Capture) -> String {
     let mut output = String::with_capacity(template.len());
     let mut rest = template;
     while let Some((head, after)) = rest.split_once('@') {
         output.push_str(head);
-        let length = after.find(|character| !capture_name(character)).unwrap_or(after.len());
-        let (name, tail) = after.split_at_checked(length).unwrap_or((after, ""));
-        let capture = (!name.is_empty()).then(|| found.capture(name)).flatten();
-        let Some(capture) = capture else {
+        let run = after.find(|character| !capture_name(character)).unwrap_or(after.len());
+        let longest = (1..=run).rev().find_map(|length| {
+            let (name, tail) = after.split_at_checked(length)?;
+            Some((resolve(found, current, name)?, tail))
+        });
+        let Some((capture, tail)) = longest else {
             output.push('@');
             rest = after;
             continue;
@@ -54,7 +63,7 @@ pub fn edits(found: &[Match], replacements: &BTreeMap<String, String>) -> Vec<Ed
                     .map(move |capture| Edit {
                         bytes: capture.bytes,
                         expect: Some(capture.text.clone()),
-                        replace: expand(template, each),
+                        replace: expand(template, each, capture),
                     })
             })
         })

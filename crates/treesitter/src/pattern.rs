@@ -58,7 +58,7 @@ enum Variable {
 
 struct Check {
     regex: Option<Regex>,
-    kind: Option<u16>,
+    kind: Option<Vec<u16>>,
 }
 
 pub struct Pattern {
@@ -71,7 +71,13 @@ pub struct Pattern {
 
 const fn sigil(language: Language) -> char {
     match language {
-        Language::Go | Language::Python | Language::Rust => 'µ',
+        Language::Go
+        | Language::Python
+        | Language::Rust
+        | Language::Bash
+        | Language::JavaScript
+        | Language::TypeScript
+        | Language::Tsx => 'µ',
         Language::Zig => '_',
         _ => '$',
     }
@@ -84,7 +90,7 @@ fn marker(variable: bool, sigil: char) -> char {
     '$'
 }
 
-fn substitute(pattern: &str, sigil: char) -> String {
+fn metavariables(pattern: &str, sigil: char) -> String {
     let mut output = String::with_capacity(pattern.len());
     let mut dollars = 0;
     for character in pattern.chars() {
@@ -99,6 +105,14 @@ fn substitute(pattern: &str, sigil: char) -> String {
     }
     output.extend(std::iter::repeat_n(marker(dollars == 3, sigil), dollars));
     output
+}
+
+fn substitute(pattern: &str, sigil: char) -> String {
+    pattern
+        .split("\\$")
+        .map(|piece| metavariables(piece, sigil))
+        .collect::<Vec<_>>()
+        .join("$")
 }
 
 fn name(rest: &str) -> Option<Option<String>> {
@@ -133,25 +147,35 @@ fn skippable(node: Node<'_>) -> bool {
     !node.is_named() && matches!(node.kind(), "," | ";")
 }
 
-fn first_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
-    let mut cursor = node.walk();
-    loop {
-        let current = cursor.node();
-        if current.kind() == kind {
-            return Some(current);
+fn enclosing<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    let mut current = Some(node);
+    while let Some(each) = current {
+        if each.kind() == kind {
+            return Some(each);
         }
-        if cursor.goto_first_child() {
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                return None;
-            }
-        }
+        current = each.parent();
     }
+    None
+}
+
+fn kinds(grammar: &tree_sitter::Language, id: u16) -> Vec<u16> {
+    if !grammar.node_kind_is_supertype(id) {
+        return vec![id];
+    }
+    grammar.subtypes_for_supertype(id).iter().flat_map(|subtype| kinds(grammar, *subtype)).collect()
+}
+
+fn names(text: &str, sigil: char) -> Vec<String> {
+    text.split(sigil)
+        .skip(1)
+        .map(|piece| {
+            piece
+                .chars()
+                .take_while(|character| character.is_ascii_uppercase() || character.is_ascii_digit() || *character == '_')
+                .collect::<String>()
+        })
+        .filter(|name| !name.is_empty() && name != "_")
+        .collect()
 }
 
 fn wrappers(language: Language) -> &'static [(&'static str, &'static str)] {
@@ -176,31 +200,38 @@ impl Pattern {
             Some(context) => Self::in_context(&substitute(context, sigil), &pattern, language)?,
             None => Self::wrapped(&pattern, language)?,
         };
+        let spanned = tree
+            .root_node()
+            .named_descendant_for_byte_range(span[0], span[1])
+            .ok_or_else(|| Error::Pattern(format!("{:?} is not a single syntax node; pick one with `selector`", rule.pattern)))?;
         let root = match &rule.selector {
-            Some(kind) => first_of_kind(tree.root_node(), kind)
-                .ok_or_else(|| Error::Pattern(format!("selector {kind:?} not found in the pattern")))?,
-            None => tree
-                .root_node()
-                .named_descendant_for_byte_range(span[0], span[1])
+            Some(kind) => enclosing(spanned, kind)
+                .ok_or_else(|| Error::Pattern(format!("selector {kind:?} does not enclose the pattern")))?,
+            None => Some(spanned)
                 .filter(|node| node.start_byte() == span[0] && node.end_byte() == span[1])
                 .ok_or_else(|| Error::Pattern(format!("{:?} is not a single syntax node; pick one with `selector`", rule.pattern)))?,
         };
         if variable(&text(root, source.as_bytes()), sigil).is_some() {
             return Err(Error::Pattern("a pattern must contain more than a single metavariable".to_owned()));
         }
+        let known = names(&text(root, source.as_bytes()), sigil);
         let grammar = language.grammar();
         let checks = rule
             .constraints
             .iter()
             .map(|(name, constraint)| {
+                let name = name.trim_start_matches('$').to_owned();
+                if !known.contains(&name) {
+                    return Err(Error::Pattern(format!("where.{name}: the pattern has no metavariable ${name}")));
+                }
                 let regex = constraint.regex.as_deref().map(Regex::new).transpose();
                 let regex = regex.map_err(|error| Error::Pattern(format!("where.{name}.regex: {error}")))?;
                 let kind = constraint.kind.as_deref().map(|kind| grammar.id_for_node_kind(kind, true));
                 if kind == Some(0) {
                     return Err(Error::Pattern(format!("where.{name}.kind: {language} has no node type {:?}", constraint.kind)));
                 }
-                let check = Check { regex, kind };
-                Ok((name.trim_start_matches('$').to_owned(), check))
+                let kind = kind.map(|kind| kinds(&grammar, kind));
+                Ok((name, Check { regex, kind }))
             })
             .collect::<Result<_, Error>>()?;
         let root = root.id();
@@ -236,7 +267,9 @@ impl Pattern {
         if tree.root_node().has_error() {
             return Err(Error::Pattern(format!("context does not parse as {language}")));
         }
-        let offset = context.find(pattern.trim()).unwrap_or_default();
+        let Some(offset) = context.find(pattern.trim()) else {
+            return Err(Error::Pattern(format!("context does not contain the pattern {:?}", pattern.trim())));
+        };
         let prefix = context.get(..offset).unwrap_or_default();
         let span = Self::span(prefix, pattern.trim());
         Ok((context.to_owned(), tree, span))
@@ -277,7 +310,7 @@ impl Pattern {
                     source,
                     bindings: Vec::new(),
                 };
-                if matcher.node(root, node) && matcher.satisfied() {
+                if matcher.node(root, node) {
                     found.push(matcher.found(node));
                 }
             }
@@ -299,7 +332,6 @@ impl Pattern {
 struct Bound {
     name: String,
     range: [usize; 2],
-    kind: Option<u16>,
 }
 
 struct Matcher<'pattern, 'source> {
@@ -325,8 +357,21 @@ impl Matcher<'_, '_> {
         if let Some(previous) = previous {
             return self.slice(previous) == self.slice(range);
         }
-        self.bindings.push(Bound { name, range, kind });
+        if !self.allowed(&name, range, kind) {
+            return false;
+        }
+        self.bindings.push(Bound { name, range });
         true
+    }
+
+    fn allowed(&self, name: &str, range: [usize; 2], kind: Option<u16>) -> bool {
+        let Some(check) = self.pattern.checks.get(name) else {
+            return true;
+        };
+        let value = String::from_utf8_lossy(self.slice(range));
+        let regex = check.regex.as_ref().is_none_or(|regex| regex.is_match(&value));
+        let kinds = check.kind.as_ref().is_none_or(|kinds| kind.is_some_and(|kind| kinds.contains(&kind)));
+        regex && kinds
     }
 
     fn node(&mut self, pattern: Node<'_>, target: Node<'_>) -> bool {
@@ -340,10 +385,10 @@ impl Matcher<'_, '_> {
         if expected.is_empty() {
             return self.pattern_text(pattern).as_bytes() == self.slice([target.start_byte(), target.end_byte()]);
         }
-        self.sequence(&expected, &children(target))
+        self.sequence(&expected, &children(target), target.start_byte())
     }
 
-    fn sequence(&mut self, expected: &[Node<'_>], actual: &[Node<'_>]) -> bool {
+    fn sequence(&mut self, expected: &[Node<'_>], actual: &[Node<'_>], position: usize) -> bool {
         let Some((first, rest)) = expected.split_first() else {
             return actual.iter().all(|node| skippable(*node));
         };
@@ -355,13 +400,12 @@ impl Matcher<'_, '_> {
                     [only] => ([only.start_byte(), only.end_byte()], Some(only.kind_id())),
                     [first, .., last] => ([first.start_byte(), last.end_byte()], None),
                     [] => {
-                        let position = remaining
-                            .first()
-                            .map_or_else(|| actual.last().map_or(0, Node::end_byte), Node::start_byte);
-                        ([position, position], None)
+                        let at = remaining.first().map_or(position, Node::start_byte);
+                        ([at, at], None)
                     }
                 };
-                if self.bind(name.clone(), range, kind) && self.sequence(rest, remaining) {
+                let next = span.last().map_or(position, Node::end_byte);
+                if self.bind(name.clone(), range, kind) && self.sequence(rest, remaining, next) {
                     return true;
                 }
                 self.bindings.truncate(checkpoint);
@@ -371,25 +415,14 @@ impl Matcher<'_, '_> {
         let Some((target, remaining)) = actual.split_first() else {
             return false;
         };
-        if self.node(*first, *target) && self.sequence(rest, remaining) {
+        if self.node(*first, *target) && self.sequence(rest, remaining, target.end_byte()) {
             return true;
         }
         self.bindings.truncate(checkpoint);
         if !skippable(*target) {
             return false;
         }
-        self.sequence(expected, remaining)
-    }
-
-    fn satisfied(&self) -> bool {
-        self.pattern.checks.iter().all(|(name, check)| {
-            let Some(bound) = self.bindings.iter().find(|bound| bound.name == *name) else {
-                return false;
-            };
-            let value = String::from_utf8_lossy(self.slice(bound.range));
-            let regex = check.regex.as_ref().is_none_or(|regex| regex.is_match(&value));
-            regex && check.kind.is_none_or(|kind| bound.kind == Some(kind))
-        })
+        self.sequence(expected, remaining, target.end_byte())
     }
 
     fn found(&self, node: Node<'_>) -> Found {
@@ -447,55 +480,71 @@ impl<'found> Rewriter<'found> {
         kept
     }
 
-    fn render(&self, range: [usize; 2], exclude: [usize; 2]) -> String {
+    fn render(&self, range: [usize; 2], exclude: [usize; 2], depth: usize) -> Result<String, Error> {
         let mut output = String::new();
         let mut position = range[0];
         for each in self.outermost(range, Some(exclude)) {
             output.push_str(self.source.get(position..each.found.bytes[0]).unwrap_or_default());
-            output.push_str(&self.expand(each));
+            output.push_str(&self.expand(each, depth + 1)?);
             position = each.found.bytes[1];
         }
         output.push_str(self.source.get(position..range[1]).unwrap_or_default());
-        output
+        Ok(output)
     }
 
-    fn expand(&self, planned: Planned<'_>) -> String {
+    fn expand(&self, planned: Planned<'_>, depth: usize) -> Result<String, Error> {
+        if depth > NESTING {
+            return Err(Error::Pattern(format!("matches nest deeper than {NESTING} levels; rewrite in smaller steps")));
+        }
         let found = planned.found;
         let mut output = String::with_capacity(planned.template.len());
         let mut rest = planned.template;
         while let Some((head, after)) = rest.split_once('$') {
+            if let Some(literal) = head.strip_suffix('\\') {
+                output.push_str(literal);
+                output.push('$');
+                rest = after;
+                continue;
+            }
             output.push_str(head);
             let dollars = 1 + 2 * usize::from(after.starts_with("$$"));
             let after = after.get(dollars - 1..).unwrap_or_default();
-            let length = after
+            let run = after
                 .find(|character: char| !(character.is_ascii_uppercase() || character.is_ascii_digit() || character == '_'))
                 .unwrap_or(after.len());
-            let (name, tail) = after.split_at_checked(length).unwrap_or((after, ""));
-            let Some(binding) = found.bindings.get(name) else {
+            let longest = (1..=run).rev().find(|length| after.get(..*length).is_some_and(|name| found.bindings.contains_key(name)));
+            let Some((binding, tail)) = longest.and_then(|length| {
+                let (name, tail) = after.split_at_checked(length)?;
+                Some((found.bindings.get(name)?, tail))
+            }) else {
                 output.push_str(&"$".repeat(dollars));
                 rest = after;
                 continue;
             };
-            let rendered = dedent(&self.render(binding.bytes, found.bytes), &indent_at(self.source, binding.bytes[0]));
+            let rendered = dedent(&self.render(binding.bytes, found.bytes, depth)?, &indent_at(self.source, binding.bytes[0]));
             output.push_str(&indent(&rendered, &trailing_indent(&output)));
             rest = tail;
         }
         output.push_str(rest);
-        indent(&output, &indent_at(self.source, found.bytes[0]))
+        Ok(indent(&output, &indent_at(self.source, found.bytes[0])))
     }
 }
 
-pub fn edits(planned: &[Planned<'_>], source: &str) -> Vec<Edit> {
+const NESTING: usize = 256;
+
+pub fn edits(planned: &[Planned<'_>], source: &str) -> Result<Vec<Edit>, Error> {
     let mut ordered: Vec<Planned<'_>> = planned.to_vec();
     ordered.sort_by_key(|each| (each.found.bytes[0], std::cmp::Reverse(each.found.bytes[1])));
     let rewriter = Rewriter { planned: ordered, source };
     rewriter
         .outermost([0, source.len()], None)
         .into_iter()
-        .map(|each| Edit {
-            bytes: each.found.bytes,
-            expect: Some(each.found.text.clone()),
-            replace: rewriter.expand(each),
+        .map(|each| {
+            Ok(Edit {
+                bytes: each.found.bytes,
+                expect: Some(each.found.text.clone()),
+                replace: rewriter.expand(each, 0)?,
+            })
         })
         .collect()
 }
