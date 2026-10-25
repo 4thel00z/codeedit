@@ -35,7 +35,7 @@ mod tests {
     }
 
     #[test]
-    fn json_is_valid_for_every_language() {
+    fn json_is_valid_in_every_language() {
         let samples: [(Language, &str); 13] = [
             (Language::Bash, "echo \"hi $USER\" | grep h\n"),
             (Language::Go, "package main\nfunc main() { println(1) }\n"),

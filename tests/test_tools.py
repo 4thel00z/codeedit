@@ -59,3 +59,10 @@ def test_rename_and_source_level(module: Path) -> None:
     result = treesitter.edit_source(SOURCE, "python", [{"op": "replace_body", "symbol": "main", "code": "pass"}])
     assert result["source"].endswith("def main():\n    pass\n")
     assert [symbol["path"] for symbol in treesitter.outline_source("fn a() {}", "rust")] == ["a"]
+
+def test_single_operations_take_a_language(tmp_path: Path) -> None:
+    script = tmp_path / "tool"
+    script.write_text("def f():\n    return 1\n")
+    treesitter.replace_body(script, "f", "return 2", language="python")
+    treesitter.add_import(script, "import os", language="python")
+    assert script.read_text() == "import os\n\ndef f():\n    return 2\n"

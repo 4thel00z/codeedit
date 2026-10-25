@@ -91,6 +91,8 @@ enum Command {
     /// Replace a whole symbol, or only its body with --body
     Replace {
         file: PathBuf,
+        #[arg(long, short)]
+        lang: Option<String>,
         symbol: String,
         #[command(flatten)]
         code: CodeArgs,
@@ -102,6 +104,8 @@ enum Command {
     /// Insert code before/after a symbol or at the start/end of its body
     Insert {
         file: PathBuf,
+        #[arg(long, short)]
+        lang: Option<String>,
         symbol: String,
         #[command(flatten)]
         code: CodeArgs,
@@ -113,6 +117,8 @@ enum Command {
     /// Delete a symbol together with its decorators or attributes
     Delete {
         file: PathBuf,
+        #[arg(long, short)]
+        lang: Option<String>,
         symbol: String,
         #[command(flatten)]
         options: EditOptions,
@@ -133,6 +139,8 @@ enum Command {
     /// Add an import unless it is already present
     AddImport {
         file: PathBuf,
+        #[arg(long, short)]
+        lang: Option<String>,
         import: String,
         #[command(flatten)]
         options: EditOptions,
@@ -309,10 +317,10 @@ fn replacement(symbol: String, code: String, body: bool) -> Operation {
     Operation::Replace { symbol, code }
 }
 
-fn single(file: PathBuf, operation: Operation, options: &EditOptions, out: &mut impl Write) -> Result<()> {
+fn single(file: PathBuf, lang: Option<&str>, operation: Operation, options: &EditOptions, out: &mut impl Write) -> Result<()> {
     let request = Request {
         file,
-        language: None,
+        language: lang.map(str::to_owned),
         operation,
     };
     let changes = tools::run(&[request], options.dry_run, options.allow_errors)?;
@@ -380,29 +388,31 @@ fn run(cli: Cli) -> Result<()> {
         }
         Command::Replace {
             file,
+            lang,
             symbol,
             code,
             body,
-            options,
+            options
         } => {
-            single(file, replacement(symbol, code.load()?, body), &options, &mut out)?;
-        }
+            single(file, lang.as_deref(), replacement(symbol, code.load()?, body), &options, &mut out)?;
+        },
         Command::Insert {
             file,
+            lang,
             symbol,
             code,
             position,
-            options,
+            options
         } => {
             let operation = Operation::Insert {
                 symbol,
                 code: code.load()?,
                 position: position.into(),
             };
-            single(file, operation, &options, &mut out)?;
-        }
-        Command::Delete { file, symbol, options } => single(file, Operation::Delete { symbol }, &options, &mut out)?,
-        Command::AddImport { file, import, options } => single(file, Operation::AddImport { import }, &options, &mut out)?,
+            single(file, lang.as_deref(), operation, &options, &mut out)?;
+        },
+        Command::Delete { file, lang, symbol, options } => single(file, lang.as_deref(), Operation::Delete { symbol }, &options, &mut out)?,
+        Command::AddImport { file, lang, import, options } => single(file, lang.as_deref(), Operation::AddImport { import }, &options, &mut out)?,
         Command::Rename {
             paths,
             from,

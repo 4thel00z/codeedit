@@ -99,21 +99,27 @@ fn find(py: Python<'_>, paths: Vec<PathBuf>, rules_json: &str, language: Option<
     py.detach(|| json(&files::find(&paths, language, &rules(rules_json)?)?)).map_err(to_py)
 }
 
+fn applies(rule: &treesitter::Rule, language: Language) -> Result<bool, Error> {
+    let Some(name) = rule.language.as_deref() else {
+        return Ok(true);
+    };
+    Ok(name.parse::<Language>()? == language)
+}
+
 #[pyfunction]
 fn find_source(py: Python<'_>, source: &[u8], language: &str, rules_json: &str) -> PyResult<String> {
     let language: Language = language.parse().map_err(to_py)?;
     py.detach(|| {
         let tree = treesitter::parse(source, language)?;
-        let found = rules(rules_json)?
-            .iter()
-            .enumerate()
-            .map(|(index, rule)| Ok((index, treesitter::Pattern::new(rule, language)?.find(&tree, source))))
-            .collect::<Result<Vec<_>, Error>>()?;
-        let flat: Vec<files::RuleMatch> = found
-            .into_iter()
-            .flat_map(|(rule, matches)| matches.into_iter().map(move |found| files::RuleMatch { rule, found }))
-            .collect();
-        json(&flat)
+        let mut found = Vec::new();
+        for (rule, each) in rules(rules_json)?.iter().enumerate() {
+            if !applies(each, language)? {
+                continue;
+            }
+            let matches = treesitter::Pattern::new(each, language)?.find(&tree, source);
+            found.extend(matches.into_iter().map(|found| files::RuleMatch { rule, found }));
+        }
+        json(&found)
     })
     .map_err(to_py)
 }
@@ -141,6 +147,9 @@ fn rewrite_source(py: Python<'_>, source: &str, language: &str, rules_json: &str
         let rules = rules(rules_json)?;
         let mut found = Vec::with_capacity(rules.len());
         for rule in &rules {
+            if !applies(rule, language)? {
+                continue;
+            }
             let template = rule.rewrite.as_deref().ok_or(Error::MissingRewrite)?;
             found.push((treesitter::Pattern::new(rule, language)?.find(&tree, source.as_bytes()), template));
         }

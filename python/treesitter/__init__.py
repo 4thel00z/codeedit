@@ -93,9 +93,11 @@ def rule_list(
     where: Mapping[str, Mapping[str, str]] | None,
     rules: Rules | None,
 ) -> str:
-    if rules is not None:
+    if rules and (pattern or rewrite or where):
+        raise ValueError("pass rules or pattern/rewrite/where, not both")
+    if rules:
         return json.dumps(list(rules))
-    if pattern is None:
+    if not pattern:
         raise ValueError("pass a pattern or rules")
     single: dict[str, Any] = {"pattern": pattern}
     if rewrite is not None:
@@ -173,31 +175,52 @@ def edit_source(source: str, language: str, operations: Operations, allow_errors
     return json.loads(native.edit_source(source, language, json.dumps(list(operations)), allow_errors))
 
 
-def single(path: Path, operation: dict[str, Any], dry_run: bool, allow_errors: bool) -> dict[str, Any]:
-    [change] = edit([{**operation, "file": path}], dry_run, allow_errors)
+def single(
+    path: Path, operation: dict[str, Any], dry_run: bool, allow_errors: bool, language: str | None
+) -> dict[str, Any]:
+    request = {**operation, "file": path, **({"language": language} if language else {})}
+    changes = edit([request], dry_run, allow_errors)
+    if not changes:
+        return {"diff": "", "edits": 0, "errors_before": 0, "errors_after": 0}
+    [change] = changes
     return change
 
 
-def replace_symbol(path: Path, symbol: str, code: str, dry_run: bool = False, allow_errors: bool = False) -> dict[str, Any]:
-    return single(path, {"op": "replace", "symbol": symbol, "code": code}, dry_run, allow_errors)
+def replace_symbol(
+    path: Path, symbol: str, code: str, dry_run: bool = False, allow_errors: bool = False, language: str | None = None
+) -> dict[str, Any]:
+    return single(path, {"op": "replace", "symbol": symbol, "code": code}, dry_run, allow_errors, language)
 
 
-def replace_body(path: Path, symbol: str, code: str, dry_run: bool = False, allow_errors: bool = False) -> dict[str, Any]:
-    return single(path, {"op": "replace_body", "symbol": symbol, "code": code}, dry_run, allow_errors)
+def replace_body(
+    path: Path, symbol: str, code: str, dry_run: bool = False, allow_errors: bool = False, language: str | None = None
+) -> dict[str, Any]:
+    return single(path, {"op": "replace_body", "symbol": symbol, "code": code}, dry_run, allow_errors, language)
 
 
 def insert(
-    path: Path, symbol: str, code: str, position: str, dry_run: bool = False, allow_errors: bool = False
+    path: Path,
+    symbol: str,
+    code: str,
+    position: str,
+    dry_run: bool = False,
+    allow_errors: bool = False,
+    language: str | None = None,
 ) -> dict[str, Any]:
-    return single(path, {"op": "insert", "symbol": symbol, "code": code, "position": position}, dry_run, allow_errors)
+    operation = {"op": "insert", "symbol": symbol, "code": code, "position": position}
+    return single(path, operation, dry_run, allow_errors, language)
 
 
-def delete_symbol(path: Path, symbol: str, dry_run: bool = False, allow_errors: bool = False) -> dict[str, Any]:
-    return single(path, {"op": "delete", "symbol": symbol}, dry_run, allow_errors)
+def delete_symbol(
+    path: Path, symbol: str, dry_run: bool = False, allow_errors: bool = False, language: str | None = None
+) -> dict[str, Any]:
+    return single(path, {"op": "delete", "symbol": symbol}, dry_run, allow_errors, language)
 
 
-def add_import(path: Path, import_: str, dry_run: bool = False, allow_errors: bool = False) -> dict[str, Any]:
-    return single(path, {"op": "add_import", "import": import_}, dry_run, allow_errors)
+def add_import(
+    path: Path, import_: str, dry_run: bool = False, allow_errors: bool = False, language: str | None = None
+) -> dict[str, Any]:
+    return single(path, {"op": "add_import", "import": import_}, dry_run, allow_errors, language)
 
 
 def rename(

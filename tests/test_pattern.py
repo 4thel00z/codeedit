@@ -40,3 +40,22 @@ def test_pattern_errors() -> None:
         treesitter.find_source("x", "python", "def (")
     with pytest.raises(ValueError, match="pass a pattern or rules"):
         treesitter.find_source("x", "python")
+
+def test_rules_cannot_be_mixed_with_a_pattern() -> None:
+    with pytest.raises(ValueError):
+        treesitter.find_source("foo(1)\n", "python", pattern="foo($A)", rules=[{"pattern": "foo($A)"}])
+    with pytest.raises(ValueError):
+        treesitter.find_source("foo(1)\n", "python", where={"A": {"regex": "1"}}, rules=[{"pattern": "foo($A)"}])
+
+
+def test_source_rules_respect_their_language() -> None:
+    rules = [{"pattern": "foo($A)", "language": "go"}, {"pattern": "foo($A)"}]
+    found = treesitter.find_source("foo(1)\n", "python", rules=rules)
+    assert [each["rule"] for each in found] == [1]
+    change = treesitter.rewrite_source("foo(1)\n", "python", rules=[{**rules[0], "rewrite": "bar($A)"}, {**rules[1], "rewrite": "baz($A)"}])
+    assert change["source"] == "baz(1)\n"
+
+
+def test_unknown_rule_keys_are_rejected() -> None:
+    with pytest.raises(ValueError):
+        treesitter.find_source("foo(1)\n", "python", rules=[{"pattern": "foo($A)", "wehre": {}}])
