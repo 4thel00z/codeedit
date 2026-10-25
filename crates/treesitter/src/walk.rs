@@ -17,7 +17,8 @@ pub fn visible(node: Node<'_>) -> bool {
 }
 
 pub fn leaf(node: Node<'_>) -> bool {
-    node.named_child_count() == 0 && !(node.has_error() && node.child_count() > 0)
+    let mut cursor = node.walk();
+    !node.children(&mut cursor).any(visible)
 }
 
 pub fn walk<'tree, E>(

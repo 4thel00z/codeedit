@@ -225,3 +225,12 @@ fn dot_and_xml_output() {
     let xml = treesitter::format::render(&tree, b"x = \"a\"\ndef f(:\n", treesitter::Format::Xml).unwrap();
     assert!(xml.contains("missing=\"true\""), "{xml}");
 }
+
+#[test]
+fn json_errors_with_only_tokens_keep_their_text() {
+    let source = b"def f():\n    return )\n";
+    let tree = parse(source, Language::Python).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&treesitter::format::render(&tree, source, treesitter::Format::Json).unwrap()).unwrap();
+    let text = json.to_string();
+    assert!(text.contains(r#""error":true"#) && text.contains(r#""text":"return )""#), "{text}");
+}

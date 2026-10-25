@@ -65,4 +65,5 @@ def test_single_operations_take_a_language(tmp_path: Path) -> None:
     script.write_text("def f():\n    return 1\n")
     treesitter.replace_body(script, "f", "return 2", language="python")
     treesitter.add_import(script, "import os", language="python")
+    assert treesitter.add_import(script, "import os", language="python") == {"file": str(script), "diff": "", "edits": 0, "errors_before": 0, "errors_after": 0}
     assert script.read_text() == "import os\n\ndef f():\n    return 2\n"

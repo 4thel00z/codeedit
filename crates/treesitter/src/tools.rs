@@ -107,6 +107,9 @@ fn literal(kind: &str) -> bool {
 
 fn protected(code: &str, language: Language) -> Vec<bool> {
     let mut rows = vec![false; code.split('\n').count()];
+    if !code.contains('\n') {
+        return rows;
+    }
     let Ok(tree) = parse(code.as_bytes(), language) else {
         return rows;
     };

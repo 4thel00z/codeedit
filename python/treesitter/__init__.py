@@ -181,7 +181,7 @@ def single(
     request = {**operation, "file": path, **({"language": language} if language else {})}
     changes = edit([request], dry_run, allow_errors)
     if not changes:
-        return {"diff": "", "edits": 0, "errors_before": 0, "errors_after": 0}
+        return {"file": fspath(path), "diff": "", "edits": 0, "errors_before": 0, "errors_after": 0}
     [change] = changes
     return change
 
