@@ -52,6 +52,18 @@ fn rust_match_arms_need_no_context() {
 }
 
 #[test]
+fn skipped_punctuation_never_includes_keywords() {
+    let python = "async def fetch(url):\n    return url\n\ndef plain(url):\n    return url\n";
+    let found = try_find(Language::Python, &rule("def $F($$$P):\n    $$$B", None), python).unwrap();
+    let names: Vec<&str> = found.iter().map(|each| each.bindings["F"].text.as_str()).collect();
+    assert_eq!(names, ["plain"]);
+    let javascript = "async function load() { go(); }\nfunction save() { go(); }\n";
+    let found = try_find(Language::JavaScript, &rule("function $F() { $$$B }", None), javascript).unwrap();
+    let names: Vec<&str> = found.iter().map(|each| each.bindings["F"].text.as_str()).collect();
+    assert_eq!(names, ["save"]);
+}
+
+#[test]
 fn multi_line_templates_take_the_match_indentation() {
     let source = "class C:\n    def f(self):\n        print(x)\n";
     let rewritten = try_rewrite(Language::Python, &rule("print($A)", Some("if debug:\n    print($A)")), source).unwrap();

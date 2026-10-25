@@ -129,6 +129,10 @@ fn children(node: Node<'_>) -> Vec<Node<'_>> {
     node.children(&mut cursor).filter(|child| !child.is_extra()).collect()
 }
 
+fn skippable(node: Node<'_>) -> bool {
+    !node.is_named() && matches!(node.kind(), "," | ";")
+}
+
 fn first_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
     let mut cursor = node.walk();
     loop {
@@ -341,7 +345,7 @@ impl Matcher<'_, '_> {
 
     fn sequence(&mut self, expected: &[Node<'_>], actual: &[Node<'_>]) -> bool {
         let Some((first, rest)) = expected.split_first() else {
-            return actual.iter().all(|node| !node.is_named());
+            return actual.iter().all(|node| skippable(*node));
         };
         let checkpoint = self.bindings.len();
         if let Some(Variable::Multiple(name)) = variable(&self.pattern_text(*first), self.pattern.sigil) {
@@ -371,7 +375,7 @@ impl Matcher<'_, '_> {
             return true;
         }
         self.bindings.truncate(checkpoint);
-        if target.is_named() {
+        if !skippable(*target) {
             return false;
         }
         self.sequence(expected, remaining)
