@@ -5,6 +5,7 @@ use tree_sitter::Tree;
 use crate::error::Error;
 use crate::language::Language;
 use crate::parse::parse;
+use crate::walk::preorder;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -28,29 +29,18 @@ pub struct Change {
 }
 
 pub fn errors(tree: &Tree) -> Vec<[usize; 2]> {
-    if !tree.root_node().has_error() {
-        return Vec::new();
-    }
-    let mut cursor = tree.walk();
     let mut found = Vec::new();
-    loop {
-        let node = cursor.node();
+    if !tree.root_node().has_error() {
+        return found;
+    }
+    preorder(tree.root_node(), |node| {
         let broken = node.is_error() || node.is_missing();
         if broken {
             found.push([node.start_byte(), node.end_byte()]);
         }
-        if !broken && node.has_error() && cursor.goto_first_child() {
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                return found;
-            }
-        }
-    }
+        !broken && node.has_error()
+    });
+    found
 }
 
 pub fn error_count(tree: &Tree) -> usize {
@@ -158,7 +148,11 @@ fn line_endings(source: &str, edits: &[Edit]) -> Vec<Edit> {
 }
 
 pub fn apply(source: &str, language: Language, edits: &[Edit], label: &str, allow_errors: bool) -> Result<Change, Error> {
-    let before = errors(&parse(source.as_bytes(), language)?);
+    apply_parsed(source, &parse(source.as_bytes(), language)?, language, edits, label, allow_errors)
+}
+
+pub fn apply_parsed(source: &str, tree: &Tree, language: Language, edits: &[Edit], label: &str, allow_errors: bool) -> Result<Change, Error> {
+    let before = errors(tree);
     let edits = line_endings(source, edits);
     let (output, count) = splice(source, &edits)?;
     let after = errors(&parse(output.as_bytes(), language)?);

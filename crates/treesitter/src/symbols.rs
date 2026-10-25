@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use serde::Serialize;
@@ -217,11 +218,17 @@ struct Definition {
     end: [usize; 2],
 }
 
+pub fn outline_source(source: &[u8], language: Language) -> Result<Vec<Symbol>, Error> {
+    let tree = crate::parse::parse(source, language)?;
+    outline(&tree, source, language)
+}
+
 pub fn outline(tree: &Tree, source: &[u8], language: Language) -> Result<Vec<Symbol>, Error> {
     let query = query(language)?;
     let names = query.capture_names();
     let mut cursor = QueryCursor::new();
     let mut found: Vec<Definition> = Vec::new();
+    let mut seen: HashSet<([usize; 2], String)> = HashSet::new();
     let mut iterator = cursor.matches(query, tree.root_node(), source);
     while let Some(each) = iterator.next() {
         let mut definition = None;
@@ -240,12 +247,12 @@ pub fn outline(tree: &Tree, source: &[u8], language: Language) -> Result<Vec<Sym
         };
         let Extent { first, signature, last } = extent(language, node, source);
         let bytes = [first.start_byte(), last.end_byte()];
-        if found.iter().any(|existing| existing.bytes == bytes && existing.name == clean_name(kind, &name)) {
+        let name = clean_name(kind, &name);
+        if !seen.insert((bytes, name.clone())) {
             continue;
         }
         let start = first.start_position();
         let end = last.end_position();
-        let name = clean_name(kind, &name);
         let title = (kind == "impl").then(|| {
             let implemented = node.child_by_field_name("trait").map(|node| clean_name("impl", &text(node, source)));
             implemented.map_or_else(|| format!("impl {name}"), |implemented| format!("impl {implemented} for {name}"))

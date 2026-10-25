@@ -4,11 +4,12 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::edit::{Change, Edit, apply};
+use crate::edit::{Change, Edit, apply, apply_parsed};
 use crate::error::Error;
 use crate::language::Language;
 use crate::parse::parse;
-use crate::pattern::{self, Found, Pattern, Rule};
+pub use crate::pattern::RuleMatch;
+use crate::pattern::{self, Pattern, Rule};
 use crate::query::{Match, compile, matches};
 use crate::rewrite;
 
@@ -24,13 +25,6 @@ pub struct FileChange {
     pub file: PathBuf,
     #[serde(flatten)]
     pub change: Change,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RuleMatch {
-    pub rule: usize,
-    #[serde(flatten)]
-    pub found: Found,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -191,13 +185,25 @@ fn queries(files: &[Target], language: Option<Language>, pattern: &str) -> Resul
     compile_each(&languages(files), language.is_some(), |language| compile(language, pattern))
 }
 
-fn search(target: &Target, query: &tree_sitter::Query) -> Result<Option<(String, Vec<Match>)>, Error> {
+pub(crate) struct Parsed {
+    pub(crate) source: String,
+    pub(crate) tree: tree_sitter::Tree,
+}
+
+pub(crate) fn parsed(target: &Target) -> Result<Option<Parsed>, Error> {
     let Some(source) = read_target(target)? else {
         return Ok(None);
     };
     let tree = parse(source.as_bytes(), target.language).map_err(|error| error.at(&target.path))?;
-    let found = matches(query, &tree, source.as_bytes());
-    Ok(Some((source, found)))
+    Ok(Some(Parsed { source, tree }))
+}
+
+fn search(target: &Target, query: &tree_sitter::Query) -> Result<Option<(Parsed, Vec<Match>)>, Error> {
+    let Some(file) = parsed(target)? else {
+        return Ok(None);
+    };
+    let found = matches(query, &file.tree, file.source.as_bytes());
+    Ok(Some((file, found)))
 }
 
 pub fn query(paths: &[PathBuf], language: Option<Language>, pattern: &str) -> Result<Vec<FileMatches>, Error> {
@@ -222,13 +228,13 @@ pub fn query(paths: &[PathBuf], language: Option<Language>, pattern: &str) -> Re
     Ok(results?.into_iter().flatten().collect())
 }
 
-pub(crate) fn changed(target: &Target, source: &str, edits: &[Edit], allow_errors: bool) -> Result<Option<FileChange>, Error> {
+pub(crate) fn changed(target: &Target, file: &Parsed, edits: &[Edit], allow_errors: bool) -> Result<Option<FileChange>, Error> {
     if edits.is_empty() {
         return Ok(None);
     }
-    let change = apply(source, target.language, edits, &target.path.display().to_string(), allow_errors)
-        .map_err(|error| error.at(&target.path))?;
-    Ok((change.source != source).then(|| FileChange {
+    let label = target.path.display().to_string();
+    let change = apply_parsed(&file.source, &file.tree, target.language, edits, &label, allow_errors).map_err(|error| error.at(&target.path))?;
+    Ok((change.source != file.source).then(|| FileChange {
         file: target.path.clone(),
         change,
     }))
@@ -259,10 +265,11 @@ pub fn rewrite_query(
             let Some(query) = compiled.get(&target.language) else {
                 return Ok(None);
             };
-            let Some((source, found)) = search(target, query)? else {
+            let Some((file, found)) = search(target, query)? else {
                 return Ok(None);
             };
-            changed(target, &source, &rewrite::edits(&found, replacements, &source, target.language), allow_errors)
+            let edits = rewrite::edits(&found, replacements, &file.source, target.language);
+            changed(target, &file, &edits, allow_errors)
         })
         .collect();
     finish(results, dry_run)
@@ -327,21 +334,13 @@ fn patterns(paths: &[PathBuf], language: Option<Language>, rules: &[Rule]) -> Re
     Ok((files, compiled))
 }
 
-fn find_in(target: &Target, rules: &[Rule], compiled: &Compiled) -> Result<Option<(String, Vec<RuleMatch>)>, Error> {
-    let Some(source) = read_target(target)? else {
+fn find_in(target: &Target, rules: &[Rule], compiled: &Compiled) -> Result<Option<(Parsed, Vec<RuleMatch>)>, Error> {
+    let Some(file) = parsed(target)? else {
         return Ok(None);
     };
-    let tree = parse(source.as_bytes(), target.language).map_err(|error| error.at(&target.path))?;
-    let found = (0..rules.len())
-        .filter_map(|index| compiled.get(&(index, target.language)).map(|pattern| (index, pattern)))
-        .flat_map(|(rule, pattern)| {
-            pattern
-                .find(&tree, source.as_bytes())
-                .into_iter()
-                .map(move |found| RuleMatch { rule, found })
-        })
-        .collect();
-    Ok(Some((source, found)))
+    let patterns = (0..rules.len()).filter_map(|index| compiled.get(&(index, target.language)).map(|pattern| (index, pattern)));
+    let found = pattern::search(patterns, &file.tree, file.source.as_bytes());
+    Ok(Some((file, found)))
 }
 
 pub fn find(paths: &[PathBuf], language: Option<Language>, rules: &[Rule]) -> Result<Vec<FilePatternMatches>, Error> {
@@ -376,20 +375,11 @@ pub fn rewrite(
     let results = files
         .par_iter()
         .map(|target| {
-            let Some((source, matches)) = find_in(target, rules, &compiled)? else {
+            let Some((file, matches)) = find_in(target, rules, &compiled)? else {
                 return Ok(None);
             };
-            let planned: Vec<pattern::Planned<'_>> = matches
-                .iter()
-                .filter_map(|each| {
-                    let template = rules.get(each.rule)?.rewrite.as_deref()?;
-                    Some(pattern::Planned {
-                        found: &each.found,
-                        template,
-                    })
-                })
-                .collect();
-            changed(target, &source, &pattern::edits(&planned, &source, target.language)?, allow_errors)
+            let edits = pattern::edits(&pattern::planned(&matches, rules), &file.source, target.language)?;
+            changed(target, &file, &edits, allow_errors)
         })
         .collect();
     finish(results, dry_run)

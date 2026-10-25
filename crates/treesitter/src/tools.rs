@@ -7,7 +7,7 @@ use tree_sitter::{Node, Tree};
 
 use crate::edit::{Change, Edit, apply, splice};
 use crate::error::Error;
-use crate::files::{FileChange, agreed, canonical, changed, collect, commit, finish, read, read_target};
+use crate::files::{FileChange, Parsed, agreed, canonical, changed, collect, commit, finish, read, read_target};
 use crate::language::Language;
 use crate::parse::parse;
 use crate::symbols::{Symbol, lookup, outline};
@@ -114,25 +114,14 @@ fn protected(code: &str, language: Language) -> Vec<bool> {
     let Ok(tree) = parse(code.as_bytes(), language) else {
         return rows;
     };
-    let mut cursor = tree.walk();
-    loop {
-        let node = cursor.node();
+    preorder(tree.root_node(), |node| {
         let [start, end] = [node.start_position().row, node.end_position().row];
         if literal(node.kind()) && end > start {
             rows.iter_mut().take(end + 1).skip(start + 1).for_each(|row| *row = true);
         }
-        if cursor.goto_first_child() {
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                return rows;
-            }
-        }
-    }
+        true
+    });
+    rows
 }
 
 fn width(line: &str) -> usize {
@@ -688,8 +677,7 @@ fn resolve(path: &Path, language: Option<&str>) -> Result<Language, Error> {
 pub fn file_outline(path: &Path, language: Option<Language>) -> Result<Vec<Symbol>, Error> {
     let language = language.map_or_else(|| Language::from_path(path), Ok)?;
     let source = read(path)?;
-    let tree = parse(source.as_bytes(), language)?;
-    outline(&tree, source.as_bytes(), language).map_err(|error| error.at(path))
+    crate::symbols::outline_source(source.as_bytes(), language).map_err(|error| error.at(path))
 }
 
 pub(crate) fn dedent(text: &str, indent: &str, language: Language) -> String {
@@ -822,9 +810,7 @@ fn identifier(node: Node<'_>) -> bool {
 
 pub fn rename_edits(tree: &Tree, source: &str, old: &str, new: &str) -> Vec<Edit> {
     let mut edits = Vec::new();
-    let mut cursor = tree.walk();
-    loop {
-        let node = cursor.node();
+    preorder(tree.root_node(), |node| {
         if identifier(node) && source.get(node.byte_range()) == Some(old) {
             edits.push(Edit {
                 bytes: [node.start_byte(), node.end_byte()],
@@ -832,18 +818,9 @@ pub fn rename_edits(tree: &Tree, source: &str, old: &str, new: &str) -> Vec<Edit
                 replace: new.to_owned(),
             });
         }
-        if cursor.goto_first_child() {
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                return edits;
-            }
-        }
-    }
+        true
+    });
+    edits
 }
 
 pub fn rename(
@@ -865,7 +842,8 @@ pub fn rename(
                 return Ok(None);
             }
             let tree = parse(source.as_bytes(), target.language).map_err(|error| error.at(&target.path))?;
-            changed(target, &source, &rename_edits(&tree, &source, old, new), allow_errors)
+            let file = Parsed { source, tree };
+            changed(target, &file, &rename_edits(&file.tree, &file.source, old, new), allow_errors)
         })
         .collect();
     finish(results, dry_run)

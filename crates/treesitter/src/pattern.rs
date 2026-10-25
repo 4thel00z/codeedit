@@ -4,7 +4,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tree_sitter::{Node, Tree};
 
-use crate::edit::Edit;
+use crate::edit::{Change, Edit, apply};
 use crate::error::Error;
 use crate::format::text;
 use crate::language::Language;
@@ -71,6 +71,20 @@ pub struct Pattern {
     sigil: char,
     language: Language,
     checks: BTreeMap<String, Check>,
+    needles: Vec<String>,
+}
+
+fn needles(root: Node<'_>, source: &str, sigil: char) -> Vec<String> {
+    let mut found = Vec::new();
+    preorder(root, |node| {
+        let word = text(node, source.as_bytes());
+        let literal = node.child_count() == 0 && !word.contains(sigil) && word.chars().any(char::is_alphanumeric);
+        if literal {
+            found.push(word.into_owned());
+        }
+        true
+    });
+    found
 }
 
 const MACRO_WRAPPERS: [(&str, &str); 2] = [("fn µwrap() { µwrap(", "); }"), ("fn µwrap() {\n", "\n}")];
@@ -83,18 +97,6 @@ fn explained(tree: &Tree, source: &str, sigil: char) -> bool {
         clean && !node.is_error()
     });
     clean
-}
-
-fn macro_bodies(tree: &Tree) -> Vec<Node<'_>> {
-    let mut found = Vec::new();
-    preorder(tree.root_node(), |node| {
-        let body = node.kind() == "token_tree" && node.parent().is_some_and(|parent| parent.kind() == "macro_invocation");
-        if body {
-            found.push(node);
-        }
-        !body
-    });
-    found
 }
 
 fn point(source: &[u8], byte: usize) -> [usize; 2] {
@@ -289,8 +291,11 @@ impl Pattern {
                 Ok((name, Check { regex, kind }))
             })
             .collect::<Result<_, Error>>()?;
+        
+        let needles = needles(root, &source, sigil);
         let root = root.id();
         Ok(Self {
+            needles,
             source,
             tree,
             root,
@@ -347,21 +352,18 @@ impl Pattern {
     }
 
     pub fn find(&self, tree: &Tree, source: &[u8]) -> Vec<Found> {
-        let mut found = self.find_nodes(tree, source);
-        if self.language != Language::Rust {
-            return found;
-        }
-        found.extend(macro_bodies(tree).into_iter().flat_map(|body| self.in_macro(body, source)));
-        found.sort_by_key(|each| (each.bytes[0], std::cmp::Reverse(each.bytes[1])));
-        found
-    }
-
-    fn find_nodes(&self, tree: &Tree, source: &[u8]) -> Vec<Found> {
         let Some(root) = self.root() else {
             return Vec::new();
         };
+        let macro_body = (self.language == Language::Rust).then(|| self.tree.language().id_for_node_kind("token_tree", true));
         let mut found = Vec::new();
+        let mut bodies = Vec::new();
         preorder(tree.root_node(), |node| {
+            let body = Some(node.kind_id()) == macro_body && node.parent().is_some_and(|parent| parent.kind() == "macro_invocation");
+            if body {
+                bodies.push(node);
+                return false;
+            }
             if node.kind_id() != root.kind_id() {
                 return true;
             }
@@ -375,6 +377,11 @@ impl Pattern {
             }
             true
         });
+        if bodies.is_empty() {
+            return found;
+        }
+        found.extend(bodies.into_iter().flat_map(|body| self.in_macro(body, source)));
+        found.sort_by_key(|each| (each.bytes[0], std::cmp::Reverse(each.bytes[1])));
         found
     }
 
@@ -383,6 +390,9 @@ impl Pattern {
         let Some(text) = source.get(inner[0]..inner[1]).and_then(|bytes| std::str::from_utf8(bytes).ok()) else {
             return Vec::new();
         };
+        if !self.needles.iter().all(|needle| text.contains(needle.as_str())) {
+            return Vec::new();
+        }
         for (prefix, suffix) in MACRO_WRAPPERS {
             let wrapped = format!("{prefix}{text}{suffix}");
             let Ok(tree) = parse(wrapped.as_bytes(), Language::Rust) else {
@@ -468,7 +478,8 @@ impl Matcher<'_, '_> {
         };
         let checkpoint = self.bindings.len();
         if let Some(Variable::Multiple(name)) = variable(&self.pattern_text(*first), self.pattern.sigil) {
-            for taken in 0..=actual.len() {
+            let required = rest.iter().filter(|node| !matches!(variable(&self.pattern_text(**node), self.pattern.sigil), Some(Variable::Multiple(_)))).count();
+            for taken in 0..=actual.len().saturating_sub(required) {
                 let (span, remaining) = actual.split_at(taken);
                 let (range, kind) = match span {
                     [only] => ([only.start_byte(), only.end_byte()], Some(only.kind_id())),
@@ -543,10 +554,14 @@ struct Rewriter<'found> {
 
 impl<'found> Rewriter<'found> {
     fn outermost(&self, range: [usize; 2], exclude: Option<[usize; 2]>) -> Vec<Planned<'found>> {
+        let first = self.planned.partition_point(|each| each.found.bytes[0] < range[0]);
         let mut kept: Vec<Planned<'found>> = Vec::new();
-        for each in &self.planned {
+        for each in self.planned.iter().skip(first) {
             let bytes = each.found.bytes;
-            let inside = range[0] <= bytes[0] && bytes[1] <= range[1] && Some(bytes) != exclude;
+            if bytes[0] > range[1] {
+                break;
+            }
+            let inside = bytes[1] <= range[1] && Some(bytes) != exclude;
             let free = kept.last().is_none_or(|last| bytes[0] >= last.found.bytes[1]);
             if inside && free {
                 kept.push(*each);
@@ -626,4 +641,64 @@ pub fn edits(planned: &[Planned<'_>], source: &str, language: Language) -> Resul
 
 pub fn plan<'found>(found: &'found [Found], template: &'found str) -> Vec<Planned<'found>> {
     found.iter().map(|found| Planned { found, template }).collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RuleMatch {
+    pub rule: usize,
+    #[serde(flatten)]
+    pub found: Found,
+}
+
+fn applies(rule: &Rule, language: Language) -> Result<bool, Error> {
+    let Some(name) = rule.language.as_deref() else {
+        return Ok(true);
+    };
+    Ok(name.parse::<Language>()? == language)
+}
+
+pub fn compile_rules(rules: &[Rule], language: Language) -> Result<Vec<(usize, Pattern)>, Error> {
+    let mut compiled = Vec::with_capacity(rules.len());
+    for (index, rule) in rules.iter().enumerate() {
+        if !applies(rule, language)? {
+            continue;
+        }
+        compiled.push((index, Pattern::new(rule, language)?));
+    }
+    Ok(compiled)
+}
+
+pub fn search<'pattern>(patterns: impl IntoIterator<Item = (usize, &'pattern Pattern)>, tree: &Tree, source: &[u8]) -> Vec<RuleMatch> {
+    patterns
+        .into_iter()
+        .flat_map(|(rule, pattern)| pattern.find(tree, source).into_iter().map(move |found| RuleMatch { rule, found }))
+        .collect()
+}
+
+pub fn planned<'found>(matches: &'found [RuleMatch], rules: &'found [Rule]) -> Vec<Planned<'found>> {
+    matches
+        .iter()
+        .filter_map(|each| {
+            let template = rules.get(each.rule)?.rewrite.as_deref()?;
+            Some(Planned {
+                found: &each.found,
+                template,
+            })
+        })
+        .collect()
+}
+
+pub fn find_source(source: &[u8], language: Language, rules: &[Rule]) -> Result<Vec<RuleMatch>, Error> {
+    let tree = parse(source, language)?;
+    let compiled = compile_rules(rules, language)?;
+    Ok(search(compiled.iter().map(|(rule, pattern)| (*rule, pattern)), &tree, source))
+}
+
+pub fn rewrite_source(source: &str, language: Language, rules: &[Rule], label: &str, allow_errors: bool) -> Result<Change, Error> {
+    if rules.iter().any(|rule| rule.rewrite.is_none()) {
+        return Err(Error::MissingRewrite);
+    }
+    let matches = find_source(source.as_bytes(), language, rules)?;
+    let edits = edits(&planned(&matches, rules), source, language)?;
+    apply(source, language, &edits, label, allow_errors)
 }

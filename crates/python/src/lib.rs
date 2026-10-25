@@ -5,6 +5,7 @@ use pyo3::exceptions::{PyOSError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use serde::Serialize;
 use treesitter::files::{self, FileEdits};
+use treesitter::pattern;
 use treesitter::query::{compile, matches};
 use treesitter::tools::{self, Operation, Request};
 use treesitter::{Edit, Error, Format, Language, Rule};
@@ -99,29 +100,10 @@ fn find(py: Python<'_>, paths: Vec<PathBuf>, rules_json: &str, language: Option<
     py.detach(|| json(&files::find(&paths, language, &rules(rules_json)?)?)).map_err(to_py)
 }
 
-fn applies(rule: &treesitter::Rule, language: Language) -> Result<bool, Error> {
-    let Some(name) = rule.language.as_deref() else {
-        return Ok(true);
-    };
-    Ok(name.parse::<Language>()? == language)
-}
-
 #[pyfunction]
 fn find_source(py: Python<'_>, source: &[u8], language: &str, rules_json: &str) -> PyResult<String> {
     let language: Language = language.parse().map_err(to_py)?;
-    py.detach(|| {
-        let tree = treesitter::parse(source, language)?;
-        let mut found = Vec::new();
-        for (rule, each) in rules(rules_json)?.iter().enumerate() {
-            if !applies(each, language)? {
-                continue;
-            }
-            let matches = treesitter::Pattern::new(each, language)?.find(&tree, source);
-            found.extend(matches.into_iter().map(|found| files::RuleMatch { rule, found }));
-        }
-        json(&found)
-    })
-    .map_err(to_py)
+    py.detach(|| json(&pattern::find_source(source, language, &rules(rules_json)?)?)).map_err(to_py)
 }
 
 #[pyfunction]
@@ -143,19 +125,7 @@ fn rewrite(
 fn rewrite_source(py: Python<'_>, source: &str, language: &str, rules_json: &str, allow_errors: bool) -> PyResult<String> {
     let language: Language = language.parse().map_err(to_py)?;
     py.detach(|| {
-        let tree = treesitter::parse(source.as_bytes(), language)?;
-        let rules = rules(rules_json)?;
-        let mut found = Vec::with_capacity(rules.len());
-        for rule in &rules {
-            if !applies(rule, language)? {
-                continue;
-            }
-            let template = rule.rewrite.as_deref().ok_or(Error::MissingRewrite)?;
-            found.push((treesitter::Pattern::new(rule, language)?.find(&tree, source.as_bytes()), template));
-        }
-        let planned: Vec<_> = found.iter().flat_map(|(found, template)| treesitter::pattern::plan(found, template)).collect();
-        let edits = treesitter::pattern::edits(&planned, source, language)?;
-        let change = treesitter::apply(source, language, &edits, "source", allow_errors)?;
+        let change = pattern::rewrite_source(source, language, &rules(rules_json)?, "source", allow_errors)?;
         json(&SourceChange {
             source: change.source.clone(),
             change,
@@ -206,11 +176,7 @@ fn outline(py: Python<'_>, path: PathBuf, language: Option<&str>) -> PyResult<St
 #[pyfunction]
 fn outline_source(py: Python<'_>, source: &[u8], language: &str) -> PyResult<String> {
     let language: Language = language.parse().map_err(to_py)?;
-    py.detach(|| {
-        let tree = treesitter::parse(source, language)?;
-        json(&treesitter::symbols::outline(&tree, source, language)?)
-    })
-    .map_err(to_py)
+    py.detach(|| json(&treesitter::symbols::outline_source(source, language)?)).map_err(to_py)
 }
 
 #[pyfunction]
