@@ -366,3 +366,16 @@ fn symbol_edits_work_in_files_broken_elsewhere() {
     let broken = "def f(:\n    pass\n\n\ndef g():\n    return 1\n";
     assert_eq!(batch(Language::Python, broken, &[body("g", "return 2")]).unwrap(), "def f(:\n    pass\n\n\ndef g():\n    return 2\n");
 }
+
+#[test]
+fn trailing_comments_on_the_last_line_go_with_the_symbol() {
+    let python = "class A:\n    def f(self):\n        return 1  # cached\n\n    def g(self):\n        pass\n";
+    assert_eq!(batch(Language::Python, python, &[delete("A.f")]).unwrap(), "class A:\n\n    def g(self):\n        pass\n");
+    assert_eq!(
+        batch(Language::Python, python, &[insert("A.f", "def h(self):\n    pass", Position::After)]).unwrap(),
+        "class A:\n    def f(self):\n        return 1  # cached\n\n    def h(self):\n        pass\n\n    def g(self):\n        pass\n"
+    );
+    let rust = "fn a() {}  // a\nfn b() {}\n";
+    assert_eq!(batch(Language::Rust, rust, &[delete("a")]).unwrap(), "fn b() {}\n");
+    assert_eq!(batch(Language::Rust, rust, &[insert("a", "fn c() {}", Position::After)]).unwrap(), "fn a() {}  // a\n\nfn c() {}\nfn b() {}\n");
+}

@@ -57,25 +57,22 @@ pub fn error_count(tree: &Tree) -> usize {
     errors(tree).len()
 }
 
-fn shifted(range: [usize; 2], edits: &[&Edit]) -> Option<[usize; 2]> {
-    let mut added = 0;
-    let mut removed = 0;
+fn shifted(range: [usize; 2], edits: &[&Edit]) -> [usize; 2] {
+    let [mut start, mut end] = range;
     for edit in edits {
-        let [start, end] = edit.bytes;
-        if start >= range[1] && start > range[0] {
-            break;
+        let [from, to] = edit.bytes;
+        if to <= range[0] {
+            start = (start + edit.replace.len()).saturating_sub(to - from);
         }
-        if end > range[0] {
-            return None;
+        if from < range[1] || (from == range[1] && from == to) {
+            end = (end + edit.replace.len()).saturating_sub(to - from);
         }
-        added += edit.replace.len();
-        removed += end - start;
     }
-    Some([(range[0] + added).checked_sub(removed)?, (range[1] + added).checked_sub(removed)?])
+    [start, end.max(start)]
 }
 
 fn introduced(before: &[[usize; 2]], after: &[[usize; 2]], edits: &[&Edit]) -> bool {
-    let kept: Vec<[usize; 2]> = before.iter().filter_map(|range| shifted(*range, edits)).collect();
+    let kept: Vec<[usize; 2]> = before.iter().map(|range| shifted(*range, edits)).collect();
     after
         .iter()
         .any(|range| !kept.iter().any(|old| old[0] <= range[1] && range[0] <= old[1]))

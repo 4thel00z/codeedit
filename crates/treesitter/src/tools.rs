@@ -236,9 +236,23 @@ fn blank(source: &str, range: [usize; 2]) -> bool {
     source.get(range[0]..range[1]).is_some_and(|content| content.trim().is_empty())
 }
 
-fn owns_lines(source: &str, symbol: &Symbol) -> bool {
+fn trailing_comment(tree: &Tree, source: &str, position: usize) -> bool {
+    let tail = source.get(position..line_end(source, position)).unwrap_or_default();
+    let start = position + horizontal(tail);
+    let mut current = tree.root_node().descendant_for_byte_range(start, start);
+    while let Some(node) = current.filter(|node| node.start_byte() == start) {
+        if node.kind().contains("comment") {
+            return node.end_byte() <= next_line(source, start);
+        }
+        current = node.parent();
+    }
+    false
+}
+
+fn owns_lines(tree: &Tree, source: &str, symbol: &Symbol) -> bool {
     let [start, end] = symbol.bytes;
-    blank(source, [line_start(source, start), start]) && blank(source, [end, end_of_line(source, end).max(end)])
+    let rest = [end, end_of_line(source, end).max(end)];
+    blank(source, [line_start(source, start), start]) && (blank(source, rest) || trailing_comment(tree, source, end))
 }
 
 fn replace(symbol: &Symbol, source: &str, language: Language, code: &str) -> Edit {
@@ -315,10 +329,10 @@ fn inline(symbol: &Symbol, source: &str, language: Language, code: &str, positio
     })
 }
 
-fn beside(symbol: &Symbol, source: &str, language: Language, code: &str, position: Position) -> Edit {
+fn beside(tree: &Tree, symbol: &Symbol, source: &str, language: Language, code: &str, position: Position) -> Edit {
     let indent = indent_at(source, symbol.bytes[0]);
     let code = reindent(code, &indent, language);
-    if owns_lines(source, symbol) {
+    if owns_lines(tree, source, symbol) {
         return match position {
             Position::Before => insertion(line_start(source, symbol.bytes[0]), format!("{code}\n\n")),
             _ => insertion(end_of_line(source, symbol.bytes[1]), format!("\n\n{code}")),
@@ -332,7 +346,7 @@ fn beside(symbol: &Symbol, source: &str, language: Language, code: &str, positio
 
 fn insert(tree: &Tree, symbol: &Symbol, source: &str, language: Language, code: &str, position: Position) -> Result<Edit, Error> {
     if matches!(position, Position::Before | Position::After) {
-        return Ok(beside(symbol, source, language, code, position));
+        return Ok(beside(tree, symbol, source, language, code, position));
     }
     let body = body(source, language, symbol)?;
     if body.shape == Shape::Inline {
@@ -391,8 +405,8 @@ fn delete_inline(symbol: &Symbol, source: &str) -> Edit {
     }
 }
 
-fn delete(symbol: &Symbol, source: &str) -> Edit {
-    if !owns_lines(source, symbol) {
+fn delete(tree: &Tree, symbol: &Symbol, source: &str) -> Edit {
+    if !owns_lines(tree, source, symbol) {
         return delete_inline(symbol, source);
     }
     let line = line_start(source, symbol.bytes[0]);
@@ -579,7 +593,7 @@ pub fn operation_edits(tree: &Tree, source: &str, language: Language, symbols: &
         Operation::Replace { symbol, code } => replace(sole(symbols, symbol)?, source, language, code),
         Operation::ReplaceBody { symbol, code } => replace_body(lookup(symbols, symbol)?, source, language, code)?,
         Operation::Insert { symbol, code, position } => insert(tree, lookup(symbols, symbol)?, source, language, code, *position)?,
-        Operation::Delete { symbol } => delete(sole(symbols, symbol)?, source),
+        Operation::Delete { symbol } => delete(tree, sole(symbols, symbol)?, source),
         Operation::AddImport { import } => return Ok(add_import(tree, source, language, import)?.into_iter().collect()),
     };
     Ok(vec![edit])

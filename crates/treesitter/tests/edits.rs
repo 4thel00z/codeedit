@@ -186,6 +186,14 @@ fn new_errors_are_rejected_even_when_old_ones_disappear() {
 }
 
 #[test]
+fn edits_inside_a_wide_existing_error_are_allowed() {
+    let broken = "class A:\n    x = [1,\n\n    def g(self):\n        return 1\n";
+    let start = broken.find("return 1").unwrap();
+    let change = apply(broken, Language::Python, &[edit(start, start + 8, Some("return 1"), "return 2")], "m.py", false).unwrap();
+    assert!(change.source.ends_with("return 2\n"));
+}
+
+#[test]
 fn crlf_sources_keep_crlf() {
     let source = "def f():\r\n    return 1\r\n";
     let change = apply(source, Language::Python, &[edit(22, 22, None, "\n    x = 1")], "m.py", false).unwrap();
