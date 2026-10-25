@@ -159,6 +159,12 @@ pub fn write_xml(tree: &Tree, source: &[u8], out: &mut impl Write) -> io::Result
         if let Some(field) = field {
             write!(out, " field=\"{field}\"")?;
         }
+        if node.is_error() {
+            out.write_all(b" error=\"true\"")?;
+        }
+        if node.is_missing() {
+            out.write_all(b" missing=\"true\"")?;
+        }
         depth += 1;
         if !leaf {
             return out.write_all(b">\n");
@@ -176,11 +182,11 @@ pub fn write_dot(tree: &Tree, source: &[u8], out: &mut impl Write) -> io::Result
             return Ok(());
         };
         let id = node.id();
-        let mut label = node.kind().to_owned();
+        let mut label = node.kind().escape_debug().to_string();
         if leaf {
             label = format!("{label}\\n{}", text(node, source).escape_debug());
         }
-        writeln!(out, "  n{id} [label=\"{}\"];", label.replace('"', "\\\""))?;
+        writeln!(out, "  n{id} [label=\"{label}\"];")?;
         if let Some(parent) = parents.last() {
             writeln!(out, "  n{parent} -> n{id} [label=\"{}\"];", field.unwrap_or_default())?;
         }

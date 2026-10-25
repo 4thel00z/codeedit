@@ -360,3 +360,9 @@ fn computed_method_names_and_constant_values() {
     let rust = "const ORIGIN: P = P { x: 1 };\n";
     assert!(matches!(batch(Language::Rust, rust, &[body("ORIGIN", "x: 2")]), Err(Error::Unsupported(_))));
 }
+
+#[test]
+fn symbol_edits_work_in_files_broken_elsewhere() {
+    let broken = "def f(:\n    pass\n\n\ndef g():\n    return 1\n";
+    assert_eq!(batch(Language::Python, broken, &[body("g", "return 2")]).unwrap(), "def f(:\n    pass\n\n\ndef g():\n    return 2\n");
+}

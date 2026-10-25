@@ -22,7 +22,7 @@ pub enum Position {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "op", rename_all = "snake_case")]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
     Replace { symbol: String, code: String },
     ReplaceBody { symbol: String, code: String },
@@ -32,12 +32,27 @@ pub enum Operation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(try_from = "serde_json::Map<String, serde_json::Value>")]
 pub struct Request {
     pub file: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
     #[serde(flatten)]
     pub operation: Operation,
+}
+
+impl TryFrom<serde_json::Map<String, serde_json::Value>> for Request {
+    type Error = serde_json::Error;
+
+    fn try_from(mut fields: serde_json::Map<String, serde_json::Value>) -> Result<Self, Self::Error> {
+        let file = fields.remove("file").ok_or_else(|| serde::de::Error::missing_field("file"))?;
+        let language = fields.remove("language").map(serde_json::from_value).transpose()?;
+        Ok(Self {
+            file: serde_json::from_value(file)?,
+            language,
+            operation: serde_json::from_value(serde_json::Value::Object(fields))?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -52,10 +67,21 @@ fn line_start(source: &str, position: usize) -> usize {
 }
 
 fn line_end(source: &str, position: usize) -> usize {
+    let end = source
+        .get(position..)
+        .and_then(|tail| tail.find('\n'))
+        .map_or(source.len(), |index| position + index);
+    if end > 0 && source.get(end - 1..end) == Some("\r") {
+        return end - 1;
+    }
+    end
+}
+
+fn next_line(source: &str, position: usize) -> usize {
     source
         .get(position..)
         .and_then(|tail| tail.find('\n'))
-        .map_or(source.len(), |index| position + index)
+        .map_or(source.len(), |index| position + index + 1)
 }
 
 pub(crate) fn indent_at(source: &str, position: usize) -> String {
@@ -378,9 +404,9 @@ fn delete(symbol: &Symbol, source: &str) -> Edit {
         }
         start = previous;
     }
-    let mut end = (end_of_line(source, symbol.bytes[1]).max(symbol.bytes[1]) + 1).min(source.len());
+    let mut end = next_line(source, symbol.bytes[1].saturating_sub(1).max(symbol.bytes[0]));
     while start == 0 && end < source.len() {
-        let next = (line_end(source, end) + 1).min(source.len());
+        let next = next_line(source, end);
         if !blank(source, [end, next]) {
             break;
         }
@@ -611,6 +637,28 @@ pub fn get(path: &Path, language: Option<Language>, wanted: &str) -> Result<Symb
     Ok(SymbolSource { symbol, text })
 }
 
+fn boundary(text: &str, mut position: usize) -> usize {
+    while !text.is_char_boundary(position) {
+        position -= 1;
+    }
+    position
+}
+
+fn difference(old: &str, new: &str) -> Edit {
+    let prefix = old.bytes().zip(new.bytes()).take_while(|(first, second)| first == second).count();
+    let prefix = boundary(old, prefix);
+    let (old_tail, new_tail) = (old.get(prefix..).unwrap_or_default(), new.get(prefix..).unwrap_or_default());
+    let suffix = old_tail.bytes().rev().zip(new_tail.bytes().rev()).take_while(|(first, second)| first == second).count();
+    let end = old.len() - suffix;
+    let end = boundary(old, end).max(prefix);
+    let replaced = new.len() - (old.len() - end);
+    Edit {
+        bytes: [prefix, end],
+        expect: None,
+        replace: new.get(prefix..replaced).unwrap_or_default().to_owned(),
+    }
+}
+
 fn step(source: &str, language: Language, operation: &Operation) -> Result<(String, usize), Error> {
     let tree = parse(source.as_bytes(), language)?;
     let symbols = match operation {
@@ -629,12 +677,7 @@ pub fn edit_source(source: &str, language: Language, operations: &[&Operation], 
         current = next;
         count += applied;
     }
-    let whole = Edit {
-        bytes: [0, source.len()],
-        expect: None,
-        replace: current,
-    };
-    let mut change = apply(source, language, &[whole], label, allow_errors)?;
+    let mut change = apply(source, language, &[difference(source, &current)], label, allow_errors)?;
     change.edits = count;
     Ok(change)
 }
@@ -673,7 +716,7 @@ pub fn run(requests: &[Request], dry_run: bool, allow_errors: bool) -> Result<Ve
             edit_file(group.file, language, &group.operations, allow_errors).map_err(|error| error.at(group.file))
         })
         .collect();
-    let changes = results?;
+    let changes: Vec<FileChange> = results?.into_iter().filter(|each| each.change.source != each.change.original).collect();
     commit(&changes, dry_run)?;
     Ok(changes)
 }

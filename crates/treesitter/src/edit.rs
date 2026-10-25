@@ -7,6 +7,7 @@ use crate::language::Language;
 use crate::parse::parse;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Edit {
     pub bytes: [usize; 2],
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -18,22 +19,27 @@ pub struct Edit {
 pub struct Change {
     #[serde(skip)]
     pub source: String,
+    #[serde(skip)]
+    pub original: String,
     pub diff: String,
     pub edits: usize,
     pub errors_before: usize,
     pub errors_after: usize,
 }
 
-pub fn error_count(tree: &Tree) -> usize {
+pub fn errors(tree: &Tree) -> Vec<[usize; 2]> {
     if !tree.root_node().has_error() {
-        return 0;
+        return Vec::new();
     }
     let mut cursor = tree.walk();
-    let mut count = 0;
+    let mut found = Vec::new();
     loop {
         let node = cursor.node();
-        count += usize::from(node.is_error() || node.is_missing());
-        if node.has_error() && cursor.goto_first_child() {
+        let broken = node.is_error() || node.is_missing();
+        if broken {
+            found.push([node.start_byte(), node.end_byte()]);
+        }
+        if !broken && node.has_error() && cursor.goto_first_child() {
             continue;
         }
         loop {
@@ -41,10 +47,38 @@ pub fn error_count(tree: &Tree) -> usize {
                 break;
             }
             if !cursor.goto_parent() {
-                return count;
+                return found;
             }
         }
     }
+}
+
+pub fn error_count(tree: &Tree) -> usize {
+    errors(tree).len()
+}
+
+fn shifted(range: [usize; 2], edits: &[&Edit]) -> Option<[usize; 2]> {
+    let mut added = 0;
+    let mut removed = 0;
+    for edit in edits {
+        let [start, end] = edit.bytes;
+        if start >= range[1] && start > range[0] {
+            break;
+        }
+        if end > range[0] {
+            return None;
+        }
+        added += edit.replace.len();
+        removed += end - start;
+    }
+    Some([(range[0] + added).checked_sub(removed)?, (range[1] + added).checked_sub(removed)?])
+}
+
+fn introduced(before: &[[usize; 2]], after: &[[usize; 2]], edits: &[&Edit]) -> bool {
+    let kept: Vec<[usize; 2]> = before.iter().filter_map(|range| shifted(*range, edits)).collect();
+    after
+        .iter()
+        .any(|range| !kept.iter().any(|old| old[0] <= range[1] && range[0] <= old[1]))
 }
 
 fn check(source: &str, edit: &Edit) -> Result<(), Error> {
@@ -73,7 +107,7 @@ fn check(source: &str, edit: &Edit) -> Result<(), Error> {
 fn ordered(edits: &[Edit]) -> Result<Vec<&Edit>, Error> {
     let mut sorted: Vec<&Edit> = edits.iter().collect();
     sorted.sort_by_key(|edit| edit.bytes);
-    sorted.dedup();
+    sorted.dedup_by(|second, first| second == first && first.bytes[0] != first.bytes[1]);
     for pair in sorted.windows(2) {
         let [first, second] = pair else {
             continue;
@@ -113,23 +147,38 @@ fn labels(label: &str) -> (String, String) {
     (format!("a/{relative}"), format!("b/{relative}"))
 }
 
+fn line_endings(source: &str, edits: &[Edit]) -> Vec<Edit> {
+    if !source.contains("\r\n") {
+        return edits.to_vec();
+    }
+    edits
+        .iter()
+        .map(|edit| Edit {
+            replace: edit.replace.replace("\r\n", "\n").replace('\n', "\r\n"),
+            ..edit.clone()
+        })
+        .collect()
+}
+
 pub fn apply(source: &str, language: Language, edits: &[Edit], label: &str, allow_errors: bool) -> Result<Change, Error> {
-    let errors_before = error_count(&parse(source.as_bytes(), language)?);
-    let (output, count) = splice(source, edits)?;
-    let errors_after = error_count(&parse(output.as_bytes(), language)?);
-    if errors_after > errors_before && !allow_errors {
+    let before = errors(&parse(source.as_bytes(), language)?);
+    let edits = line_endings(source, edits);
+    let (output, count) = splice(source, &edits)?;
+    let after = errors(&parse(output.as_bytes(), language)?);
+    if !allow_errors && introduced(&before, &after, &ordered(&edits)?) {
         return Err(Error::Syntax {
-            before: errors_before,
-            after: errors_after,
+            before: before.len(),
+            after: after.len(),
         });
     }
     let (old, new) = labels(label);
     let diff = unified_diff(Algorithm::Myers, source, &output, 3, Some((&old, &new)));
     Ok(Change {
         source: output,
+        original: source.to_owned(),
         diff,
         edits: count,
-        errors_before,
-        errors_after,
+        errors_before: before.len(),
+        errors_after: after.len(),
     })
 }

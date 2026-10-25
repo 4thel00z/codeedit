@@ -12,6 +12,7 @@ use crate::parse::parse;
 use crate::tools::{dedent, indent, indent_at};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Constraint {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regex: Option<String>,
@@ -20,6 +21,7 @@ pub struct Constraint {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Rule {
     pub pattern: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

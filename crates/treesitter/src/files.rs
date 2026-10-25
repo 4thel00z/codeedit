@@ -41,6 +41,7 @@ pub struct FilePatternMatches {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FileEdits {
     pub file: PathBuf,
     #[serde(default)]
@@ -126,12 +127,29 @@ pub(crate) fn read_target(target: &Target) -> Result<Option<String>, Error> {
     Err(Error::from(error).at(&target.path))
 }
 
+fn restore(written: &[&FileChange]) {
+    for change in written {
+        let _ = std::fs::write(&change.file, &change.change.original);
+    }
+}
+
 pub(crate) fn commit(changes: &[FileChange], dry_run: bool) -> Result<(), Error> {
     if dry_run {
         return Ok(());
     }
     for change in changes {
-        std::fs::write(&change.file, &change.change.source).map_err(|error| Error::from(error).at(&change.file))?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&change.file)
+            .map_err(|error| Error::from(error).at(&change.file))?;
+    }
+    let mut written: Vec<&FileChange> = Vec::with_capacity(changes.len());
+    for change in changes {
+        if let Err(error) = std::fs::write(&change.file, &change.change.source) {
+            restore(&written);
+            return Err(Error::from(error).at(&change.file));
+        }
+        written.push(change);
     }
     Ok(())
 }
@@ -284,7 +302,7 @@ pub fn apply_edits(requests: &[FileEdits], dry_run: bool, allow_errors: bool) ->
             })
         })
         .collect();
-    let changes = results?;
+    let changes: Vec<FileChange> = results?.into_iter().filter(|each| each.change.source != each.change.original).collect();
     commit(&changes, dry_run)?;
     Ok(changes)
 }

@@ -3,7 +3,7 @@ use std::fs;
 
 use treesitter::files::{apply_edits, query, rewrite_query};
 use treesitter::query::{compile, matches};
-use treesitter::{Edit, Error, FileEdits, Language, apply, parse};
+use treesitter::{Edit, Error, FileEdits, Language, Request, Rule, apply, parse};
 
 const PYTHON: &str = "def foo(x):\n    return foo(x) + bar(foo)\n";
 
@@ -159,4 +159,61 @@ fn apply_edits_merges_one_file_named_two_ways() {
     ];
     assert!(matches!(apply_edits(&requests, false, false), Err(Error::File { .. } | Error::Overlap { .. })));
     assert_eq!(fs::read_to_string(&path).unwrap(), PYTHON);
+}
+
+#[test]
+fn unknown_fields_are_rejected() {
+    assert!(serde_json::from_str::<Edit>(r#"{"bytes": [4, 7], "expected": "zzz", "replace": "bar"}"#).is_err());
+    assert!(serde_json::from_str::<Rule>(r#"{"pattern": "f($A)", "where": {"A": {"regexp": "^x"}}}"#).is_err());
+    assert!(serde_json::from_str::<Rule>(r#"{"pattern": "f($A)", "rewrites": "g($A)"}"#).is_err());
+    assert!(serde_json::from_str::<FileEdits>(r#"{"file": "a.py", "edit": []}"#).is_err());
+    assert!(serde_json::from_str::<Request>(r#"{"op": "replace", "file": "a.py", "symbol": "f", "code": "x", "langauge": "python"}"#).is_err());
+    let request: Request = serde_json::from_str(r#"{"op": "delete", "file": "a.py", "language": "python", "symbol": "f"}"#).unwrap();
+    assert_eq!(request.language.as_deref(), Some("python"));
+}
+
+#[test]
+fn identical_inserts_both_apply() {
+    let change = apply(PYTHON, Language::Python, &[edit(0, 0, None, "# a\n"), edit(0, 0, None, "# a\n")], "m.py", false).unwrap();
+    assert!(change.source.starts_with("# a\n# a\ndef foo"));
+}
+
+#[test]
+fn new_errors_are_rejected_even_when_old_ones_disappear() {
+    let broken = "def f(:\n    pass\n\nx = 1\n";
+    let fixes_one_breaks_another = [edit(6, 7, Some(":"), "):"), edit(18, 23, Some("x = 1"), "x = (")];
+    assert!(matches!(apply(broken, Language::Python, &fixes_one_breaks_another, "m.py", false), Err(Error::Syntax { .. })));
+}
+
+#[test]
+fn crlf_sources_keep_crlf() {
+    let source = "def f():\r\n    return 1\r\n";
+    let change = apply(source, Language::Python, &[edit(22, 22, None, "\n    x = 1")], "m.py", false).unwrap();
+    assert_eq!(change.source, "def f():\r\n    return 1\r\n    x = 1\r\n");
+}
+
+#[test]
+fn writes_are_all_or_nothing_across_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("a.py");
+    let second = directory.path().join("b.py");
+    fs::write(&first, "foo(1)\n").unwrap();
+    fs::write(&second, "foo(2)\n").unwrap();
+    let mut permissions = fs::metadata(&second).unwrap().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&second, permissions).unwrap();
+    let rules = [Rule { pattern: "foo($A)".to_owned(), rewrite: Some("bar($A)".to_owned()), ..Rule::default() }];
+    assert!(treesitter::files::rewrite(&[directory.path().to_path_buf()], None, &rules, false, false).is_err());
+    assert_eq!(fs::read_to_string(&first).unwrap(), "foo(1)\n");
+    let unchanged = [Rule { pattern: "baz($A)".to_owned(), rewrite: Some("qux($A)".to_owned()), ..Rule::default() }];
+    assert!(treesitter::files::rewrite(std::slice::from_ref(&second), None, &unchanged, false, false).unwrap().is_empty());
+}
+
+#[test]
+fn dot_and_xml_output() {
+    let tree = parse(b"x = \"a\"\ndef f(:\n", Language::Python).unwrap();
+    let dot = treesitter::format::render(&tree, b"x = \"a\"\ndef f(:\n", treesitter::Format::Dot).unwrap();
+    assert!(!dot.contains("\\\\\""), "{dot}");
+    let xml = treesitter::format::render(&tree, b"x = \"a\"\ndef f(:\n", treesitter::Format::Xml).unwrap();
+    assert!(xml.contains("missing=\"true\""), "{xml}");
 }
