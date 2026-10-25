@@ -257,3 +257,26 @@ fn deeply_nested_rewrites_fail_instead_of_crashing() {
     let found = try_find(Language::Python, &rule("$A + $B", None), &source).unwrap();
     assert!(edits(&plan(&found, "add($A, $B)"), &source, Language::Python).is_err());
 }
+
+#[test]
+fn multiple_metavariables_stand_in_for_fields() {
+    let mut fields = rule("$V { file: PathBuf, $$$F }", None);
+    fields.context = Some("enum E { $V { file: PathBuf, $$$F } }".to_owned());
+    fields.selector = Some("enum_variant".to_owned());
+    let source = "enum C {\n    Get { file: PathBuf, symbol: String },\n    Languages,\n}\n";
+    let found = try_find(Language::Rust, &fields, source).unwrap();
+    assert_eq!(found[0].bindings["F"].text, "symbol: String");
+    let plain = try_find(Language::Rust, &rule("struct $S { $$$F }", None), "struct P { x: i32, y: i32 }\n").unwrap();
+    assert_eq!(plain[0].bindings["F"].text, "x: i32, y: i32");
+}
+
+#[test]
+fn patterns_match_inside_rust_macros() {
+    let source = "fn t() {\n    assert!(edits(a, b).is_err());\n    let v = vec![x.unwrap(), y];\n}\n";
+    let found = try_find(Language::Rust, &rule("edits($$$A)", None), source).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].start, [1, 12]);
+    assert_eq!(found[0].bindings["A"].text, "a, b");
+    let rewritten = try_rewrite(Language::Rust, &rule("$E.unwrap()", Some("$E?")), source).unwrap();
+    assert_eq!(rewritten, "fn t() {\n    assert!(edits(a, b).is_err());\n    let v = vec![x?, y];\n}\n");
+}

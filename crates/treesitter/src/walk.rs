@@ -55,3 +55,20 @@ pub fn walk<'tree, E>(
         }
     }
 }
+
+pub fn preorder<'tree>(node: Node<'tree>, mut visit: impl FnMut(Node<'tree>) -> bool) {
+    let mut cursor = node.walk();
+    loop {
+        if visit(cursor.node()) && cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return;
+            }
+        }
+    }
+}

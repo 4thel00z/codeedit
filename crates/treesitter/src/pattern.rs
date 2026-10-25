@@ -9,6 +9,7 @@ use crate::error::Error;
 use crate::format::text;
 use crate::language::Language;
 use crate::parse::parse;
+use crate::walk::preorder;
 use crate::tools::{dedent, indent, indent_at};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -68,7 +69,59 @@ pub struct Pattern {
     tree: Tree,
     root: usize,
     sigil: char,
+    language: Language,
     checks: BTreeMap<String, Check>,
+}
+
+const MACRO_WRAPPERS: [(&str, &str); 2] = [("fn µwrap() { µwrap(", "); }"), ("fn µwrap() {\n", "\n}")];
+
+fn explained(tree: &Tree, source: &str, sigil: char) -> bool {
+    let mut clean = true;
+    preorder(tree.root_node(), |node| {
+        let stray = node.is_error() && variable(text(node, source.as_bytes()).trim(), sigil).is_none();
+        clean &= !(node.is_missing() || stray);
+        clean && !node.is_error()
+    });
+    clean
+}
+
+fn macro_bodies(tree: &Tree) -> Vec<Node<'_>> {
+    let mut found = Vec::new();
+    preorder(tree.root_node(), |node| {
+        let body = node.kind() == "token_tree" && node.parent().is_some_and(|parent| parent.kind() == "macro_invocation");
+        if body {
+            found.push(node);
+        }
+        !body
+    });
+    found
+}
+
+fn point(source: &[u8], byte: usize) -> [usize; 2] {
+    let head = source.get(..byte).unwrap_or_default();
+    let row = head.iter().filter(|character| **character == b'\n').count();
+    let column = head.iter().rev().take_while(|character| **character != b'\n').count();
+    [row, column]
+}
+
+fn relocate(found: Found, from: usize, to: usize, source: &[u8]) -> Found {
+    let moved = |byte: usize| byte.saturating_sub(from) + to;
+    let bytes = found.bytes.map(moved);
+    let bindings = found
+        .bindings
+        .into_iter()
+        .map(|(name, binding)| {
+            let bytes = binding.bytes.map(moved);
+            (name, Binding { bytes, ..binding })
+        })
+        .collect();
+    Found {
+        start: point(source, bytes[0]),
+        end: point(source, bytes[1]),
+        bytes,
+        bindings,
+        ..found
+    }
 }
 
 const fn sigil(language: Language) -> char {
@@ -142,7 +195,7 @@ fn variable(value: &str, sigil: char) -> Option<Variable> {
 
 fn children(node: Node<'_>) -> Vec<Node<'_>> {
     let mut cursor = node.walk();
-    node.children(&mut cursor).filter(|child| !child.is_extra()).collect()
+    node.children(&mut cursor).filter(|child| !child.is_extra() || child.is_error()).collect()
 }
 
 fn skippable(node: Node<'_>) -> bool {
@@ -242,6 +295,7 @@ impl Pattern {
             tree,
             root,
             sigil,
+            language,
             checks,
         })
     }
@@ -252,21 +306,25 @@ impl Pattern {
     }
 
     fn wrapped(pattern: &str, language: Language) -> Result<(String, Tree, [usize; 2]), Error> {
+        let mut parsed = Vec::with_capacity(wrappers(language).len());
         for (prefix, suffix) in wrappers(language) {
             let source = format!("{prefix}{pattern}{suffix}");
             let tree = parse(source.as_bytes(), language)?;
             if !tree.root_node().has_error() {
                 return Ok((source, tree, Self::span(prefix, pattern)));
             }
+            parsed.push((source, tree, Self::span(prefix, pattern)));
         }
-        Err(Error::Pattern(format!(
-            "{pattern:?} does not parse as {language}; give it a `context` and pick the node with `selector`"
-        )))
+        let sigil = sigil(language);
+        parsed
+            .into_iter()
+            .find(|(source, tree, _)| explained(tree, source, sigil))
+            .ok_or_else(|| Error::Pattern(format!("{pattern:?} does not parse as {language}; give it a `context` and pick the node with `selector`")))
     }
 
     fn in_context(context: &str, pattern: &str, language: Language) -> Result<(String, Tree, [usize; 2]), Error> {
         let tree = parse(context.as_bytes(), language)?;
-        if tree.root_node().has_error() {
+        if tree.root_node().has_error() && !explained(&tree, context, sigil(language)) {
             return Err(Error::Pattern(format!("context does not parse as {language}")));
         }
         let Some(offset) = context.find(pattern.trim()) else {
@@ -278,56 +336,70 @@ impl Pattern {
     }
 
     fn root(&self) -> Option<Node<'_>> {
-        let mut cursor = self.tree.walk();
-        loop {
-            let node = cursor.node();
+        let mut found = None;
+        preorder(self.tree.root_node(), |node| {
             if node.id() == self.root {
-                return Some(node);
+                found = Some(node);
             }
-            if cursor.goto_first_child() {
-                continue;
-            }
-            loop {
-                if cursor.goto_next_sibling() {
-                    break;
-                }
-                if !cursor.goto_parent() {
-                    return None;
-                }
-            }
-        }
+            found.is_none()
+        });
+        found
     }
 
     pub fn find(&self, tree: &Tree, source: &[u8]) -> Vec<Found> {
+        let mut found = self.find_nodes(tree, source);
+        if self.language != Language::Rust {
+            return found;
+        }
+        found.extend(macro_bodies(tree).into_iter().flat_map(|body| self.in_macro(body, source)));
+        found.sort_by_key(|each| (each.bytes[0], std::cmp::Reverse(each.bytes[1])));
+        found
+    }
+
+    fn find_nodes(&self, tree: &Tree, source: &[u8]) -> Vec<Found> {
         let Some(root) = self.root() else {
             return Vec::new();
         };
         let mut found = Vec::new();
-        let mut cursor = tree.walk();
-        loop {
-            let node = cursor.node();
-            if node.kind_id() == root.kind_id() {
-                let mut matcher = Matcher {
-                    pattern: self,
-                    source,
-                    bindings: Vec::new(),
-                };
-                if matcher.node(root, node) {
-                    found.push(matcher.found(node));
-                }
+        preorder(tree.root_node(), |node| {
+            if node.kind_id() != root.kind_id() {
+                return true;
             }
-            if cursor.goto_first_child() {
+            let mut matcher = Matcher {
+                pattern: self,
+                source,
+                bindings: Vec::new(),
+            };
+            if matcher.node(root, node) {
+                found.push(matcher.found(node));
+            }
+            true
+        });
+        found
+    }
+
+    fn in_macro(&self, body: Node<'_>, source: &[u8]) -> Vec<Found> {
+        let inner = [body.start_byte() + 1, body.end_byte().saturating_sub(1).max(body.start_byte() + 1)];
+        let Some(text) = source.get(inner[0]..inner[1]).and_then(|bytes| std::str::from_utf8(bytes).ok()) else {
+            return Vec::new();
+        };
+        for (prefix, suffix) in MACRO_WRAPPERS {
+            let wrapped = format!("{prefix}{text}{suffix}");
+            let Ok(tree) = parse(wrapped.as_bytes(), Language::Rust) else {
+                continue;
+            };
+            if tree.root_node().has_error() {
                 continue;
             }
-            loop {
-                if cursor.goto_next_sibling() {
-                    break;
-                }
-                if !cursor.goto_parent() {
-                    return found;
-                }
-            }
+            let span = [prefix.len(), prefix.len() + text.len()];
+            return self
+                .find(&tree, wrapped.as_bytes())
+                .into_iter()
+                .filter(|found| span[0] <= found.bytes[0] && found.bytes[1] <= span[1])
+                .map(|found| relocate(found, span[0], inner[0], source))
+                .collect();
         }
+        Vec::new()
     }
 }
 
