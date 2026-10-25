@@ -41,7 +41,7 @@ const JAVASCRIPT: &str = r"
 (generator_function_declaration name: (identifier) @name) @definition.function
 (class_declaration name: (_) @name) @definition.class
 (method_definition name: (_) @name) @definition.method
-(lexical_declaration (variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)])) @definition.function
+(variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)]) @definition.function
 ";
 
 const TYPESCRIPT: &str = r"
@@ -55,7 +55,7 @@ const TYPESCRIPT: &str = r"
 (interface_declaration name: (_) @name) @definition.interface
 (type_alias_declaration name: (_) @name) @definition.type
 (enum_declaration name: (_) @name) @definition.enum
-(lexical_declaration (variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)])) @definition.function
+(variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)]) @definition.function
 ";
 
 const ZIG: &str = r#"
@@ -105,17 +105,29 @@ fn query(language: Language) -> Result<&'static Query, Error> {
 }
 
 fn wrapper(language: Language, node: Node<'_>) -> bool {
+    let single = node.named_child_count() == 1;
     match language {
         Language::Python => node.kind() == "decorated_definition",
-        Language::JavaScript | Language::TypeScript | Language::Tsx => node.kind() == "export_statement",
-        Language::Go => {
-            matches!(node.kind(), "type_declaration" | "const_declaration" | "var_declaration") && node.named_child_count() == 1
-        }
+        Language::JavaScript | Language::TypeScript | Language::Tsx => match node.kind() {
+            "export_statement" | "ambient_declaration" => true,
+            "lexical_declaration" | "variable_declaration" => single,
+            _ => false,
+        },
+        Language::Go => matches!(node.kind(), "type_declaration" | "const_declaration" | "var_declaration") && single,
         _ => false,
     }
 }
 
+fn own_line(node: Node<'_>, source: &[u8]) -> bool {
+    let head = source.get(..node.start_byte()).unwrap_or_default();
+    let line = head.rsplit(|byte| *byte == b'\n').next().unwrap_or_default();
+    line.iter().all(u8::is_ascii_whitespace)
+}
+
 fn doc_comment(language: Language, node: Node<'_>, source: &[u8]) -> bool {
+    if !own_line(node, source) {
+        return false;
+    }
     let content = text(node, source);
     match (language, node.kind()) {
         (Language::Rust, "line_comment" | "block_comment") => {
@@ -129,7 +141,11 @@ fn doc_comment(language: Language, node: Node<'_>, source: &[u8]) -> bool {
 }
 
 fn attribute(language: Language, node: Node<'_>) -> bool {
-    language == Language::Rust && node.kind() == "attribute_item"
+    match language {
+        Language::Rust => node.kind() == "attribute_item",
+        Language::JavaScript | Language::TypeScript | Language::Tsx => node.kind() == "decorator",
+        _ => false,
+    }
 }
 
 struct Extent<'tree> {
@@ -185,7 +201,8 @@ fn clean_name(kind: &str, raw: &str) -> String {
     if !matches!(kind, "impl" | "method") {
         return trimmed.to_owned();
     }
-    trimmed.split(['<', '[']).next().unwrap_or(trimmed).trim().to_owned()
+    let generic = trimmed.find(['<', '[']).filter(|index| *index > 0);
+    generic.and_then(|index| trimmed.get(..index)).unwrap_or(trimmed).trim().to_owned()
 }
 
 struct Definition {
@@ -223,7 +240,7 @@ pub fn outline(tree: &Tree, source: &[u8], language: Language) -> Result<Vec<Sym
         };
         let Extent { first, signature, last } = extent(language, node, source);
         let bytes = [first.start_byte(), last.end_byte()];
-        if found.iter().any(|existing| existing.bytes == bytes) {
+        if found.iter().any(|existing| existing.bytes == bytes && existing.name == clean_name(kind, &name)) {
             continue;
         }
         let start = first.start_position();
@@ -240,7 +257,7 @@ pub fn outline(tree: &Tree, source: &[u8], language: Language) -> Result<Vec<Sym
             kind: kind.to_owned(),
             receiver,
             bytes,
-            body: body(node, 3).map(|body| [body.start_byte(), body.end_byte()]),
+            body: (!matches!(kind, "constant" | "variable")).then(|| body(node, 3)).flatten().map(|body| [body.start_byte(), body.end_byte()]),
             start: [start.row, start.column],
             end: [end.row, end.column],
         });
@@ -257,7 +274,7 @@ fn nest(found: Vec<Definition>, source: &[u8]) -> Vec<Symbol> {
         while stack
             .last()
             .and_then(|index| symbols.get(*index))
-            .is_some_and(|parent| parent.bytes[1] <= definition.bytes[0])
+            .is_some_and(|parent| parent.bytes[1] <= definition.bytes[0] || parent.bytes == definition.bytes)
         {
             stack.pop();
         }

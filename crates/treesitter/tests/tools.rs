@@ -324,3 +324,39 @@ fn same_path_symbols_are_addressable_by_line() {
     assert!(matches!(batch(Language::Python, python, &[delete("A.x")]), Err(Error::Ambiguous { .. })));
     assert_eq!(batch(Language::Python, python, &[delete("A.x:6")]).unwrap(), "class A:\n    @property\n    def x(self):\n        return 1\n");
 }
+
+#[test]
+fn trailing_comments_stay_with_their_line() {
+    let go = "package m\n\nconst (\n\tA = 1 // a\n\tB = 2 // b\n\tC = 3 // c\n)\n";
+    let replaced = batch(Language::Go, go, &[Operation::Replace { symbol: "C".to_owned(), code: "C = 4".to_owned() }]).unwrap();
+    assert_eq!(replaced, "package m\n\nconst (\n\tA = 1 // a\n\tB = 2 // b\n\tC = 4 // c\n)\n");
+    let after_code = "package m\n\nvar x = 1 // x is one\nfunc b() {}\n";
+    let replaced = batch(Language::Go, after_code, &[Operation::Replace { symbol: "b".to_owned(), code: "func b() { return }".to_owned() }]).unwrap();
+    assert_eq!(replaced, "package m\n\nvar x = 1 // x is one\nfunc b() { return }\n");
+}
+
+#[test]
+fn typescript_decorators_and_declare_belong_to_their_symbol() {
+    let decorated = "class A {\n  @HostListener(\"click\")\n  onClick() {}\n\n  other() {}\n}\n";
+    assert_eq!(batch(Language::TypeScript, decorated, &[delete("A.onClick")]).unwrap(), "class A {\n\n  other() {}\n}\n");
+    let ambient = "export declare function legacy(): void;\nexport function next() {}\n";
+    assert_eq!(batch(Language::TypeScript, ambient, &[delete("legacy")]).unwrap(), "export function next() {}\n");
+}
+
+#[test]
+fn multi_name_declarations_keep_their_siblings() {
+    let javascript = "const a = () => 1, b = () => 2;\nb();\n";
+    assert_eq!(paths(Language::JavaScript, javascript).unwrap(), pairs(&[("a", "function"), ("b", "function")]));
+    assert_eq!(batch(Language::JavaScript, javascript, &[delete("a")]).unwrap(), "const b = () => 2;\nb();\n");
+    let go = "package m\n\nvar x, y = 1, 2\n";
+    assert_eq!(paths(Language::Go, go).unwrap(), pairs(&[("x", "variable"), ("y", "variable")]));
+    assert!(matches!(batch(Language::Go, go, &[delete("x")]), Err(Error::Conflict(_))));
+}
+
+#[test]
+fn computed_method_names_and_constant_values() {
+    let typescript = "class A {\n  [Symbol.iterator]() {}\n}\n";
+    assert_eq!(paths(Language::TypeScript, typescript).unwrap(), pairs(&[("A", "class"), ("A.[Symbol.iterator]", "method")]));
+    let rust = "const ORIGIN: P = P { x: 1 };\n";
+    assert!(matches!(batch(Language::Rust, rust, &[body("ORIGIN", "x: 2")]), Err(Error::Unsupported(_))));
+}

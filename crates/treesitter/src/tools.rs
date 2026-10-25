@@ -531,12 +531,29 @@ pub fn add_import(tree: &Tree, source: &str, language: Language, import: &str) -
     Ok(Some(at_top(preamble_end(tree, source, preamble), import)))
 }
 
+fn sole<'symbols>(symbols: &'symbols [Symbol], wanted: &str) -> Result<&'symbols Symbol, Error> {
+    let symbol = lookup(symbols, wanted)?;
+    let siblings: Vec<&str> = symbols
+        .iter()
+        .filter(|other| other.bytes == symbol.bytes && other.path != symbol.path)
+        .map(|other| other.path.as_str())
+        .collect();
+    if siblings.is_empty() {
+        return Ok(symbol);
+    }
+    Err(Error::Conflict(format!(
+        "{} shares its declaration with {}; edit the declaration with apply instead",
+        symbol.path,
+        siblings.join(", ")
+    )))
+}
+
 pub fn operation_edits(tree: &Tree, source: &str, language: Language, symbols: &[Symbol], operation: &Operation) -> Result<Vec<Edit>, Error> {
     let edit = match operation {
-        Operation::Replace { symbol, code } => replace(lookup(symbols, symbol)?, source, language, code),
+        Operation::Replace { symbol, code } => replace(sole(symbols, symbol)?, source, language, code),
         Operation::ReplaceBody { symbol, code } => replace_body(lookup(symbols, symbol)?, source, language, code)?,
         Operation::Insert { symbol, code, position } => insert(tree, lookup(symbols, symbol)?, source, language, code, *position)?,
-        Operation::Delete { symbol } => delete(lookup(symbols, symbol)?, source),
+        Operation::Delete { symbol } => delete(sole(symbols, symbol)?, source),
         Operation::AddImport { import } => return Ok(add_import(tree, source, language, import)?.into_iter().collect()),
     };
     Ok(vec![edit])
