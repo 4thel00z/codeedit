@@ -309,8 +309,24 @@ fn without_impls(candidates: Vec<&Symbol>) -> Vec<&Symbol> {
     preferred
 }
 
-pub fn lookup<'symbols>(symbols: &'symbols [Symbol], wanted: &str) -> Result<&'symbols Symbol, Error> {
+fn at_line(wanted: &str) -> Option<(&str, usize)> {
+    let (path, line) = wanted.rsplit_once(':')?;
+    Some((path, line.parse().ok()?))
+}
+
+fn located<'symbols>(symbols: &'symbols [Symbol], wanted: &str) -> Vec<&'symbols Symbol> {
     let chosen = without_impls(candidates(symbols, wanted));
+    if !chosen.is_empty() {
+        return chosen;
+    }
+    let Some((path, line)) = at_line(wanted) else {
+        return chosen;
+    };
+    candidates(symbols, path).into_iter().filter(|symbol| symbol.start[0] + 1 == line).collect()
+}
+
+pub fn lookup<'symbols>(symbols: &'symbols [Symbol], wanted: &str) -> Result<&'symbols Symbol, Error> {
+    let chosen = located(symbols, wanted);
     match chosen[..] {
         [only] => Ok(only),
         [] => Err(Error::NoSymbol {
@@ -319,7 +335,7 @@ pub fn lookup<'symbols>(symbols: &'symbols [Symbol], wanted: &str) -> Result<&'s
         }),
         _ => Err(Error::Ambiguous {
             name: wanted.to_owned(),
-            candidates: chosen.iter().map(|symbol| format!("{} ({}:{})", symbol.path, symbol.kind, symbol.start[0] + 1)).collect(),
+            candidates: chosen.iter().map(|symbol| format!("{}:{} ({})", symbol.path, symbol.start[0] + 1, symbol.kind)).collect(),
         }),
     }
 }

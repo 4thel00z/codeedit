@@ -5,9 +5,9 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tree_sitter::{Node, Tree};
 
-use crate::edit::{Edit, apply};
+use crate::edit::{Change, Edit, apply, splice};
 use crate::error::Error;
-use crate::files::{FileChange, changed, collect, commit, finish, read, read_target};
+use crate::files::{FileChange, agreed, canonical, changed, collect, commit, finish, read, read_target};
 use crate::language::Language;
 use crate::parse::parse;
 use crate::symbols::{Symbol, lookup, outline};
@@ -71,17 +71,62 @@ fn indent_unit(language: Language, source: &str) -> &'static str {
     "    "
 }
 
-pub fn reindent(code: &str, indent: &str) -> String {
-    let lines: Vec<&str> = code.trim_matches('\n').lines().collect();
+fn end_of_line(source: &str, end: usize) -> usize {
+    line_end(source, end.saturating_sub(1))
+}
+
+fn literal(kind: &str) -> bool {
+    kind.contains("string") || kind.contains("heredoc")
+}
+
+fn protected(code: &str, language: Language) -> Vec<bool> {
+    let mut rows = vec![false; code.split('\n').count()];
+    let Ok(tree) = parse(code.as_bytes(), language) else {
+        return rows;
+    };
+    let mut cursor = tree.walk();
+    loop {
+        let node = cursor.node();
+        let [start, end] = [node.start_position().row, node.end_position().row];
+        if literal(node.kind()) && end > start {
+            rows.iter_mut().take(end + 1).skip(start + 1).for_each(|row| *row = true);
+        }
+        if cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return rows;
+            }
+        }
+    }
+}
+
+fn width(line: &str) -> usize {
+    line.len() - line.trim_start().len()
+}
+
+pub fn reindent(code: &str, indent: &str, language: Language) -> String {
+    let code = code.trim_matches('\n');
+    let kept = protected(code, language);
+    let lines: Vec<&str> = code.split('\n').collect();
     let common = lines
         .iter()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| line.len() - line.trim_start().len())
+        .zip(&kept)
+        .filter(|(line, kept)| !**kept && !line.trim().is_empty())
+        .map(|(line, _)| width(line))
         .min()
         .unwrap_or(0);
     lines
         .iter()
-        .map(|line| {
+        .zip(&kept)
+        .map(|(line, kept)| {
+            if *kept {
+                return (*line).to_owned();
+            }
             if line.trim().is_empty() {
                 return String::new();
             }
@@ -91,18 +136,31 @@ pub fn reindent(code: &str, indent: &str) -> String {
         .join("\n")
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    Braces,
+    Block,
+    Inline,
+    Expression,
+}
+
 struct Body {
-    braces: bool,
+    shape: Shape,
     inner: [usize; 2],
     indent: String,
     closing: String,
 }
 
-fn block_indent(source: &str, symbol_start: usize, start: usize, nested: String) -> String {
-    if line_start(source, start) == line_start(source, symbol_start) {
-        return nested;
+fn opening(text: &str, language: Language) -> Option<usize> {
+    if language == Language::Python || !text.ends_with('}') {
+        return None;
     }
-    indent_at(source, start)
+    let open = text.find('{')?;
+    let prefix = text.get(..open).unwrap_or_default();
+    let keyword = prefix
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | ' ' | '\t' | '(' | ')'));
+    keyword.then_some(open)
 }
 
 fn body(source: &str, language: Language, symbol: &Symbol) -> Result<Body, Error> {
@@ -112,20 +170,36 @@ fn body(source: &str, language: Language, symbol: &Symbol) -> Result<Body, Error
     let text = source.get(start..end).unwrap_or_default();
     let symbol_indent = indent_at(source, symbol.bytes[0]);
     let nested = format!("{symbol_indent}{}", indent_unit(language, source));
-    let (Some(open), Some(close)) = (text.find('{'), text.rfind('}')) else {
+    let line = line_start(source, start);
+    let inline = !blank(source, [line, start]);
+    let Some(open) = opening(text, language) else {
+        let head = source.get(line..start).unwrap_or_default();
+        let shape = match (language, inline) {
+            (Language::Python, true) => Shape::Inline,
+            (Language::Python, false) => Shape::Block,
+            _ => Shape::Expression,
+        };
+        let inner = match shape {
+            Shape::Inline => [line + head.trim_end().len(), end],
+            _ => [start, end],
+        };
+        let indent = match shape {
+            Shape::Block => indent_at(source, start),
+            _ => nested,
+        };
         return Ok(Body {
-            braces: false,
-            inner: [start, end],
-            indent: block_indent(source, symbol.bytes[0], start, nested),
+            shape,
+            inner,
+            indent,
             closing: symbol_indent,
         });
     };
-    let inner = [start + open + 1, start + close];
+    let inner = [start + open + 1, end - 1];
     let content = source.get(inner[0]..inner[1]).unwrap_or_default();
     let first = content.lines().skip(1).find(|line| !line.trim().is_empty());
     let indent = first.map_or(nested, |line| line.chars().take_while(|character| character.is_whitespace()).collect());
     Ok(Body {
-        braces: true,
+        shape: Shape::Braces,
         inner,
         indent,
         closing: indent_at(source, inner[1]),
@@ -136,9 +210,14 @@ fn blank(source: &str, range: [usize; 2]) -> bool {
     source.get(range[0]..range[1]).is_some_and(|content| content.trim().is_empty())
 }
 
-fn replace(symbol: &Symbol, source: &str, code: &str) -> Edit {
+fn owns_lines(source: &str, symbol: &Symbol) -> bool {
+    let [start, end] = symbol.bytes;
+    blank(source, [line_start(source, start), start]) && blank(source, [end, end_of_line(source, end).max(end)])
+}
+
+fn replace(symbol: &Symbol, source: &str, language: Language, code: &str) -> Edit {
     let start = line_start(source, symbol.bytes[0]);
-    let replacement = reindent(code, &indent_at(source, symbol.bytes[0]));
+    let replacement = reindent(code, &indent_at(source, symbol.bytes[0]), language);
     if !blank(source, [start, symbol.bytes[0]]) {
         return Edit {
             bytes: symbol.bytes,
@@ -153,15 +232,16 @@ fn replace(symbol: &Symbol, source: &str, code: &str) -> Edit {
     }
 }
 
-fn wrap_braces(body: &Body, code: &str) -> String {
-    format!("\n{}\n{}", reindent(code, &body.indent), body.closing)
+fn wrap_braces(body: &Body, code: &str, language: Language) -> String {
+    format!("\n{}\n{}", reindent(code, &body.indent, language), body.closing)
 }
 
-fn body_replacement(body: &Body, code: &str) -> String {
-    if body.braces {
-        return wrap_braces(body, code);
+fn body_replacement(body: &Body, code: &str, language: Language) -> String {
+    match body.shape {
+        Shape::Braces => wrap_braces(body, code, language),
+        Shape::Inline => format!("\n{}", reindent(code, &body.indent, language)),
+        Shape::Block | Shape::Expression => reindent(code, &body.indent, language).trim_start().to_owned(),
     }
-    reindent(code, &body.indent).trim_start().to_owned()
 }
 
 fn replace_body(symbol: &Symbol, source: &str, language: Language, code: &str) -> Result<Edit, Error> {
@@ -169,7 +249,7 @@ fn replace_body(symbol: &Symbol, source: &str, language: Language, code: &str) -
     Ok(Edit {
         bytes: body.inner,
         expect: source.get(body.inner[0]..body.inner[1]).map(str::to_owned),
-        replace: body_replacement(&body, code),
+        replace: body_replacement(&body, code, language),
     })
 }
 
@@ -188,16 +268,56 @@ fn gap(code: &str) -> &'static str {
     ""
 }
 
-fn insert(symbol: &Symbol, source: &str, language: Language, code: &str, position: Position) -> Result<Edit, Error> {
+fn docstring(tree: &Tree, body: &Body) -> Option<usize> {
+    let block = tree.root_node().named_descendant_for_byte_range(body.inner[0], body.inner[1])?;
+    let first = block.named_child(0)?;
+    let string = first.kind() == "expression_statement" && first.named_child(0).is_some_and(|child| child.kind() == "string");
+    string.then(|| first.end_byte())
+}
+
+fn inline(symbol: &Symbol, source: &str, language: Language, code: &str, position: Position) -> Result<Edit, Error> {
+    let body = body(source, language, symbol)?;
+    let existing = source.get(body.inner[0]..body.inner[1]).unwrap_or_default().trim();
+    let combined = match position {
+        Position::Start => format!("{code}\n{existing}"),
+        _ => format!("{existing}\n{code}"),
+    };
+    Ok(Edit {
+        bytes: body.inner,
+        expect: source.get(body.inner[0]..body.inner[1]).map(str::to_owned),
+        replace: format!("\n{}", reindent(&combined, &body.indent, language)),
+    })
+}
+
+fn beside(symbol: &Symbol, source: &str, language: Language, code: &str, position: Position) -> Edit {
     let indent = indent_at(source, symbol.bytes[0]);
+    let code = reindent(code, &indent, language);
+    if owns_lines(source, symbol) {
+        return match position {
+            Position::Before => insertion(line_start(source, symbol.bytes[0]), format!("{code}\n\n")),
+            _ => insertion(end_of_line(source, symbol.bytes[1]), format!("\n\n{code}")),
+        };
+    }
     match position {
-        Position::Before => return Ok(insertion(line_start(source, symbol.bytes[0]), format!("{}\n\n", reindent(code, &indent)))),
-        Position::After => return Ok(insertion(line_end(source, symbol.bytes[1]), format!("\n\n{}", reindent(code, &indent)))),
-        Position::Start | Position::End => {}
+        Position::Before => insertion(symbol.bytes[0], format!("{} ", code.trim_start())),
+        _ => insertion(symbol.bytes[1], format!(" {}", code.trim_start())),
+    }
+}
+
+fn insert(tree: &Tree, symbol: &Symbol, source: &str, language: Language, code: &str, position: Position) -> Result<Edit, Error> {
+    if matches!(position, Position::Before | Position::After) {
+        return Ok(beside(symbol, source, language, code, position));
     }
     let body = body(source, language, symbol)?;
-    let code = reindent(code, &body.indent);
-    if body.braces && blank(source, body.inner) {
+    if body.shape == Shape::Inline {
+        return inline(symbol, source, language, code, position);
+    }
+    if body.shape == Shape::Expression {
+        return Err(Error::Unsupported(format!("{} {} has an expression body; use replace_body", symbol.kind, symbol.path)));
+    }
+    let code = reindent(code, &body.indent, language);
+    let braces = body.shape == Shape::Braces;
+    if braces && blank(source, body.inner) {
         return Ok(Edit {
             bytes: body.inner,
             expect: source.get(body.inner[0]..body.inner[1]).map(str::to_owned),
@@ -205,27 +325,51 @@ fn insert(symbol: &Symbol, source: &str, language: Language, code: &str, positio
         });
     }
     let gap = gap(&code);
-    let edit = match (position, body.braces) {
+    let documented = (position == Position::Start && !braces).then(|| docstring(tree, &body)).flatten();
+    if let Some(end) = documented {
+        return Ok(insertion(end_of_line(source, end), format!("\n{code}{gap}")));
+    }
+    let edit = match (position, braces) {
         (Position::Start, true) => insertion(body.inner[0], format!("\n{code}{gap}")),
         (Position::Start, false) => insertion(line_start(source, body.inner[0]), format!("{code}\n{gap}")),
         (_, true) if blank(source, [line_start(source, body.inner[1]), body.inner[1]]) => {
             insertion(line_start(source, body.inner[1]), format!("{gap}{code}\n"))
         }
         (_, true) => insertion(body.inner[1], format!("\n{code}\n{}", body.closing)),
-        (_, false) => insertion(line_end(source, body.inner[1]), format!("\n{gap}{code}")),
+        (_, false) => insertion(end_of_line(source, body.inner[1]), format!("\n{gap}{code}")),
     };
     Ok(edit)
 }
 
-fn delete(symbol: &Symbol, source: &str) -> Edit {
-    let line = line_start(source, symbol.bytes[0]);
-    if !blank(source, [line, symbol.bytes[0]]) {
-        return Edit {
-            bytes: symbol.bytes,
-            expect: source.get(symbol.bytes[0]..symbol.bytes[1]).map(str::to_owned),
-            replace: String::new(),
-        };
+fn horizontal(text: &str) -> usize {
+    text.len() - text.trim_start_matches([' ', '\t']).len()
+}
+
+fn delete_inline(symbol: &Symbol, source: &str) -> Edit {
+    let [mut start, mut end] = symbol.bytes;
+    let after = source.get(end..).unwrap_or_default();
+    end += horizontal(after);
+    let separated = source.get(end..).is_some_and(|rest| rest.starts_with(','));
+    if separated {
+        end += 1 + horizontal(source.get(end + 1..).unwrap_or_default());
     }
+    let before = source.get(..start).unwrap_or_default().trim_end_matches([' ', '\t']);
+    if !separated && before.ends_with(',') {
+        start = before.len() - 1;
+        end = symbol.bytes[1];
+    }
+    Edit {
+        bytes: [start, end],
+        expect: source.get(start..end).map(str::to_owned),
+        replace: String::new(),
+    }
+}
+
+fn delete(symbol: &Symbol, source: &str) -> Edit {
+    if !owns_lines(source, symbol) {
+        return delete_inline(symbol, source);
+    }
+    let line = line_start(source, symbol.bytes[0]);
     let mut start = line;
     while start > 0 {
         let previous = line_start(source, start - 1);
@@ -234,7 +378,7 @@ fn delete(symbol: &Symbol, source: &str) -> Edit {
         }
         start = previous;
     }
-    let mut end = (line_end(source, symbol.bytes[1]) + 1).min(source.len());
+    let mut end = (end_of_line(source, symbol.bytes[1]).max(symbol.bytes[1]) + 1).min(source.len());
     while start == 0 && end < source.len() {
         let next = (line_end(source, end) + 1).min(source.len());
         if !blank(source, [end, next]) {
@@ -275,14 +419,14 @@ fn preamble_end(tree: &Tree, source: &str, skipped: &[&str]) -> usize {
         if !(skipped.contains(&node.kind()) || docstring) {
             break;
         }
-        end = line_end(source, node.end_byte());
+        end = end_of_line(source, node.end_byte());
     }
     end
 }
 
 fn after_last(nodes: &[Node<'_>], source: &str, import: &str) -> Option<Edit> {
     let last = nodes.last()?;
-    Some(insertion(line_end(source, last.end_byte()), format!("\n{import}")))
+    Some(insertion(end_of_line(source, last.end_byte()), format!("\n{import}")))
 }
 
 fn at_top(position: usize, import: &str) -> Edit {
@@ -293,11 +437,31 @@ fn at_top(position: usize, import: &str) -> Edit {
 }
 
 fn go_spec(import: &str) -> String {
-    let spec = import.trim().trim_start_matches("import").trim();
+    let trimmed = import.trim();
+    let spec = trimmed
+        .strip_prefix("import")
+        .filter(|rest| rest.starts_with(char::is_whitespace))
+        .unwrap_or(trimmed)
+        .trim();
     if spec.ends_with('"') || spec.ends_with('`') {
         return spec.to_owned();
     }
     format!("\"{spec}\"")
+}
+
+fn spread(list: Node<'_>, source: &str, spec: &str) -> Edit {
+    let mut cursor = list.walk();
+    let existing: Vec<String> = list
+        .named_children(&mut cursor)
+        .filter(|node| node.kind() == "import_spec")
+        .filter_map(|node| source.get(node.byte_range()).map(|text| format!("\t{text}")))
+        .collect();
+    let lines = existing.into_iter().chain(std::iter::once(format!("\t{spec}"))).collect::<Vec<_>>().join("\n");
+    Edit {
+        bytes: [list.start_byte(), list.end_byte()],
+        expect: source.get(list.byte_range()).map(str::to_owned),
+        replace: format!("(\n{lines}\n)"),
+    }
 }
 
 fn add_go_import(tree: &Tree, source: &str, import: &str) -> Option<Edit> {
@@ -325,13 +489,16 @@ fn add_go_import(tree: &Tree, source: &str, import: &str) -> Option<Edit> {
     });
     if let Some(list) = list {
         let close = list.end_byte().saturating_sub(1);
+        if line_start(source, close) == line_start(source, list.start_byte()) {
+            return Some(spread(list, source, &spec));
+        }
         return Some(insertion(line_start(source, close), format!("\t{spec}\n")));
     }
     if let Some(edit) = after_last(&declarations, source, &format!("import {spec}")) {
         return Some(edit);
     }
     let package = top_level(tree, &["package_clause"]);
-    let position = package.first().map_or(0, |node| line_end(source, node.end_byte()));
+    let position = package.first().map_or(0, |node| end_of_line(source, node.end_byte()));
     Some(at_top(position, &format!("import {spec}")))
 }
 
@@ -351,7 +518,7 @@ pub fn add_import(tree: &Tree, source: &str, language: Language, import: &str) -
             &["comment"],
         ),
         Language::Rust => (top_level(tree, &["use_declaration", "extern_crate_declaration"]), &["line_comment", "block_comment", "inner_attribute_item"]),
-        Language::JavaScript | Language::TypeScript | Language::Tsx => (top_level(tree, &["import_statement"]), &["comment"]),
+        Language::JavaScript | Language::TypeScript | Language::Tsx => (top_level(tree, &["import_statement"]), &["comment", "hash_bang_line"]),
         Language::Zig => (zig_imports(tree, source), &["comment"]),
         _ => return Err(Error::Unsupported(format!("add_import is not available for {language}"))),
     };
@@ -366,9 +533,9 @@ pub fn add_import(tree: &Tree, source: &str, language: Language, import: &str) -
 
 pub fn operation_edits(tree: &Tree, source: &str, language: Language, symbols: &[Symbol], operation: &Operation) -> Result<Vec<Edit>, Error> {
     let edit = match operation {
-        Operation::Replace { symbol, code } => replace(lookup(symbols, symbol)?, source, code),
+        Operation::Replace { symbol, code } => replace(lookup(symbols, symbol)?, source, language, code),
         Operation::ReplaceBody { symbol, code } => replace_body(lookup(symbols, symbol)?, source, language, code)?,
-        Operation::Insert { symbol, code, position } => insert(lookup(symbols, symbol)?, source, language, code, *position)?,
+        Operation::Insert { symbol, code, position } => insert(tree, lookup(symbols, symbol)?, source, language, code, *position)?,
         Operation::Delete { symbol } => delete(lookup(symbols, symbol)?, source),
         Operation::AddImport { import } => return Ok(add_import(tree, source, language, import)?.into_iter().collect()),
     };
@@ -389,22 +556,26 @@ pub fn file_outline(path: &Path, language: Option<Language>) -> Result<Vec<Symbo
     outline(&tree, source.as_bytes(), language).map_err(|error| error.at(path))
 }
 
-pub(crate) fn dedent(text: &str, indent: &str) -> String {
+pub(crate) fn dedent(text: &str, indent: &str, language: Language) -> String {
+    let kept = protected(text, language);
     text.split('\n')
+        .zip(kept)
         .enumerate()
-        .map(|(index, line)| match index {
-            0 => line,
+        .map(|(index, (line, kept))| match (index, kept) {
+            (0, _) | (_, true) => line,
             _ => line.strip_prefix(indent).unwrap_or(line),
         })
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-pub(crate) fn indent(text: &str, prefix: &str) -> String {
+pub(crate) fn indent(text: &str, prefix: &str, language: Language) -> String {
+    let kept = protected(text, language);
     text.split('\n')
+        .zip(kept)
         .enumerate()
-        .map(|(index, line)| match index {
-            0 => line.to_owned(),
+        .map(|(index, (line, kept))| match (index, kept) {
+            (0, _) | (_, true) => line.to_owned(),
             _ if line.trim().is_empty() => line.to_owned(),
             _ => format!("{prefix}{line}"),
         })
@@ -418,45 +589,71 @@ pub fn get(path: &Path, language: Option<Language>, wanted: &str) -> Result<Symb
     let tree = parse(source.as_bytes(), language)?;
     let symbols = outline(&tree, source.as_bytes(), language).map_err(|error| error.at(path))?;
     let symbol = lookup(&symbols, wanted).map_err(|error| error.at(path))?.clone();
-    let text = dedent(source.get(symbol.bytes[0]..symbol.bytes[1]).unwrap_or_default(), &indent_at(&source, symbol.bytes[0]));
+    let raw = source.get(symbol.bytes[0]..symbol.bytes[1]).unwrap_or_default();
+    let text = dedent(raw, &indent_at(&source, symbol.bytes[0]), language);
     Ok(SymbolSource { symbol, text })
 }
 
-pub fn operations_edits(tree: &Tree, source: &str, language: Language, operations: &[&Operation]) -> Result<Vec<Edit>, Error> {
-    let needs_symbols = operations.iter().any(|operation| !matches!(operation, Operation::AddImport { .. }));
-    let symbols = needs_symbols
-        .then(|| outline(tree, source.as_bytes(), language))
-        .transpose()?
-        .unwrap_or_default();
-    let mut edits = Vec::new();
+fn step(source: &str, language: Language, operation: &Operation) -> Result<(String, usize), Error> {
+    let tree = parse(source.as_bytes(), language)?;
+    let symbols = match operation {
+        Operation::AddImport { .. } => Vec::new(),
+        _ => outline(&tree, source.as_bytes(), language)?,
+    };
+    let edits = operation_edits(&tree, source, language, &symbols, operation)?;
+    splice(source, &edits)
+}
+
+pub fn edit_source(source: &str, language: Language, operations: &[&Operation], label: &str, allow_errors: bool) -> Result<Change, Error> {
+    let mut current = source.to_owned();
+    let mut count = 0;
     for operation in operations {
-        edits.extend(operation_edits(tree, source, language, &symbols, operation)?);
+        let (next, applied) = step(&current, language, operation)?;
+        current = next;
+        count += applied;
     }
-    Ok(edits)
+    let whole = Edit {
+        bytes: [0, source.len()],
+        expect: None,
+        replace: current,
+    };
+    let mut change = apply(source, language, &[whole], label, allow_errors)?;
+    change.edits = count;
+    Ok(change)
 }
 
 fn edit_file(path: &Path, language: Language, operations: &[&Operation], allow_errors: bool) -> Result<FileChange, Error> {
     let source = read(path)?;
-    let tree = parse(source.as_bytes(), language)?;
-    let edits = operations_edits(&tree, &source, language, operations)?;
-    let change = apply(&source, language, &edits, &path.display().to_string(), allow_errors)?;
+    let change = edit_source(&source, language, operations, &path.display().to_string(), allow_errors)?;
     Ok(FileChange {
         file: path.to_path_buf(),
         change,
     })
 }
 
+struct Group<'request> {
+    file: &'request Path,
+    language: Option<&'request str>,
+    operations: Vec<&'request Operation>,
+}
+
 pub fn run(requests: &[Request], dry_run: bool, allow_errors: bool) -> Result<Vec<FileChange>, Error> {
-    let mut groups: BTreeMap<&Path, (Option<&str>, Vec<&Operation>)> = BTreeMap::new();
+    let mut groups: BTreeMap<PathBuf, Group<'_>> = BTreeMap::new();
     for request in requests {
-        let entry = groups.entry(request.file.as_path()).or_insert_with(|| (request.language.as_deref(), Vec::new()));
-        entry.1.push(&request.operation);
+        let key = canonical(&request.file)?;
+        let group = groups.entry(key).or_insert_with(|| Group {
+            file: &request.file,
+            language: None,
+            operations: Vec::new(),
+        });
+        group.language = agreed(group.language, request.language.as_deref(), &request.file)?;
+        group.operations.push(&request.operation);
     }
     let results: Result<Vec<FileChange>, Error> = groups
         .into_par_iter()
-        .map(|(path, (language, operations))| {
-            let language = resolve(path, language).map_err(|error| error.at(path))?;
-            edit_file(path, language, &operations, allow_errors).map_err(|error| error.at(path))
+        .map(|(_, group)| {
+            let language = resolve(group.file, group.language).map_err(|error| error.at(group.file))?;
+            edit_file(group.file, language, &group.operations, allow_errors).map_err(|error| error.at(group.file))
         })
         .collect();
     let changes = results?;
@@ -465,7 +662,9 @@ pub fn run(requests: &[Request], dry_run: bool, allow_errors: bool) -> Result<Ve
 }
 
 fn identifier(node: Node<'_>) -> bool {
-    node.child_count() == 0 && (node.kind().ends_with("identifier") || node.kind() == "word")
+    let kind = node.kind();
+    node.child_count() == 0
+        && (kind.ends_with("identifier") || kind.ends_with("identifier_pattern") || matches!(kind, "word" | "variable_name"))
 }
 
 pub fn rename_edits(tree: &Tree, source: &str, old: &str, new: &str) -> Vec<Edit> {

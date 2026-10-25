@@ -145,7 +145,7 @@ fn rewrite_source(py: Python<'_>, source: &str, language: &str, rules_json: &str
             found.push((treesitter::Pattern::new(rule, language)?.find(&tree, source.as_bytes()), template));
         }
         let planned: Vec<_> = found.iter().flat_map(|(found, template)| treesitter::pattern::plan(found, template)).collect();
-        let edits = treesitter::pattern::edits(&planned, source)?;
+        let edits = treesitter::pattern::edits(&planned, source, language)?;
         let change = treesitter::apply(source, language, &edits, "source", allow_errors)?;
         json(&SourceChange {
             source: change.source.clone(),
@@ -227,10 +227,8 @@ fn edit_source(py: Python<'_>, source: &str, language: &str, operations: &str, a
     let language: Language = language.parse().map_err(to_py)?;
     py.detach(|| {
         let operations: Vec<Operation> = serde_json::from_str(operations)?;
-        let tree = treesitter::parse(source.as_bytes(), language)?;
         let borrowed: Vec<&Operation> = operations.iter().collect();
-        let edits = tools::operations_edits(&tree, source, language, &borrowed)?;
-        let change = treesitter::apply(source, language, &edits, "source", allow_errors)?;
+        let change = tools::edit_source(source, language, &borrowed, "source", allow_errors)?;
         json(&SourceChange {
             source: change.source.clone(),
             change,

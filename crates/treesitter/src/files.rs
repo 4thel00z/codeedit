@@ -55,20 +55,36 @@ pub struct Target {
     pub explicit: bool,
 }
 
+pub(crate) fn canonical(path: &Path) -> Result<PathBuf, Error> {
+    std::fs::canonicalize(path).map_err(|error| Error::from(error).at(path))
+}
+
+pub(crate) fn agreed<'name>(current: Option<&'name str>, wanted: Option<&'name str>, path: &Path) -> Result<Option<&'name str>, Error> {
+    let (Some(current), Some(wanted)) = (current, wanted) else {
+        return Ok(current.or(wanted));
+    };
+    if current == wanted {
+        return Ok(Some(current));
+    }
+    Err(Error::Conflict(format!("{} is given as both {current} and {wanted}", path.display())))
+}
+
 pub fn collect(paths: &[PathBuf], language: Option<Language>) -> Result<Vec<Target>, Error> {
     let mut found = Vec::new();
     for path in paths {
         if path.is_file() {
             let detected = language.map_or_else(|| Language::from_path(path), Ok)?;
-            found.push(Target {
+            found.push((canonical(path)?, Target {
                 path: path.clone(),
                 language: detected,
                 explicit: true,
-            });
+            }));
             continue;
         }
         for entry in ignore::WalkBuilder::new(path).build() {
-            let entry = entry.map_err(|error| Error::Io(std::io::Error::other(error)))?;
+            let Ok(entry) = entry else {
+                continue;
+            };
             if !entry.file_type().is_some_and(|kind| kind.is_file()) {
                 continue;
             }
@@ -78,16 +94,21 @@ pub fn collect(paths: &[PathBuf], language: Option<Language>) -> Result<Vec<Targ
             if language.is_some_and(|wanted| wanted != detected) {
                 continue;
             }
-            found.push(Target {
+            let Ok(key) = canonical(entry.path()) else {
+                continue;
+            };
+            found.push((key, Target {
                 path: entry.into_path(),
                 language: detected,
                 explicit: false,
-            });
+            }));
         }
     }
-    found.sort();
-    found.dedup_by(|second, first| second.path == first.path);
-    Ok(found)
+    found.sort_by(|first, second| first.0.cmp(&second.0).then(second.1.explicit.cmp(&first.1.explicit)));
+    found.dedup_by(|second, first| second.0 == first.0);
+    let mut targets: Vec<Target> = found.into_iter().map(|(_, target)| target).collect();
+    targets.sort();
+    Ok(targets)
 }
 
 pub(crate) fn read(path: &Path) -> Result<String, Error> {
@@ -230,21 +251,24 @@ pub fn rewrite_query(
 }
 
 fn grouped(requests: &[FileEdits]) -> Result<Vec<(PathBuf, Language, Vec<Edit>)>, Error> {
-    let mut groups: BTreeMap<PathBuf, (Language, Vec<Edit>)> = BTreeMap::new();
+    let mut groups: BTreeMap<PathBuf, (PathBuf, Option<&str>, Vec<Edit>)> = BTreeMap::new();
     for request in requests {
         let path = &request.file;
-        let language = match &request.language {
-            Some(name) => name.parse(),
-            None => Language::from_path(path),
-        }
-        .map_err(|error| error.at(path))?;
-        groups
-            .entry(path.clone())
-            .or_insert_with(|| (language, Vec::new()))
-            .1
-            .extend(request.edits.iter().cloned());
+        let group = groups.entry(canonical(path)?).or_insert_with(|| (path.clone(), None, Vec::new()));
+        group.1 = agreed(group.1, request.language.as_deref(), path)?;
+        group.2.extend(request.edits.iter().cloned());
     }
-    Ok(groups.into_iter().map(|(path, (language, edits))| (path, language, edits)).collect())
+    groups
+        .into_values()
+        .map(|(path, language, edits)| {
+            let language = match language {
+                Some(name) => name.parse(),
+                None => Language::from_path(&path),
+            }
+            .map_err(|error| error.at(&path))?;
+            Ok((path, language, edits))
+        })
+        .collect()
 }
 
 pub fn apply_edits(requests: &[FileEdits], dry_run: bool, allow_errors: bool) -> Result<Vec<FileChange>, Error> {
@@ -347,7 +371,7 @@ pub fn rewrite(
                     })
                 })
                 .collect();
-            changed(target, &source, &pattern::edits(&planned, &source)?, allow_errors)
+            changed(target, &source, &pattern::edits(&planned, &source, target.language)?, allow_errors)
         })
         .collect();
     finish(results, dry_run)

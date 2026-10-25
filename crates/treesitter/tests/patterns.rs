@@ -20,7 +20,7 @@ fn try_find(language: Language, rule: &Rule, source: &str) -> Result<Vec<Found>,
 
 fn try_rewrite(language: Language, rule: &Rule, source: &str) -> Result<String, Error> {
     let found = try_find(language, rule, source)?;
-    let edits = edits(&plan(&found, rule.rewrite.as_deref().ok_or(Error::MissingRewrite)?), source)?;
+    let edits = edits(&plan(&found, rule.rewrite.as_deref().ok_or(Error::MissingRewrite)?), source, language)?;
     Ok(apply(source, language, &edits, "x", false)?.source)
 }
 
@@ -255,5 +255,5 @@ fn empty_trailing_multiple_binds_where_it_would_be() {
 fn deeply_nested_rewrites_fail_instead_of_crashing() {
     let source = format!("x = {}\n", vec!["a"; 20_000].join(" + "));
     let found = try_find(Language::Python, &rule("$A + $B", None), &source).unwrap();
-    assert!(edits(&plan(&found, "add($A, $B)"), &source).is_err());
+    assert!(edits(&plan(&found, "add($A, $B)"), &source, Language::Python).is_err());
 }

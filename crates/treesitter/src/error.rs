@@ -20,6 +20,8 @@ pub enum Error {
     NoSymbol { name: String, available: Vec<String> },
     #[error("symbol {name:?} is ambiguous: {}", candidates.join(", "))]
     Ambiguous { name: String, candidates: Vec<String> },
+    #[error("{0}")]
+    Conflict(String),
     #[error("rule has no rewrite")]
     MissingRewrite,
     #[error("query has no capture named @{0}")]

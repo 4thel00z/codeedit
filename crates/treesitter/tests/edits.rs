@@ -146,3 +146,17 @@ fn apply_edits_is_all_or_nothing() {
     apply_edits(&merged, false, false).unwrap();
     assert_eq!(fs::read_to_string(&first).unwrap(), "def one(x):\n    return two(x) + bar(foo)\n");
 }
+
+#[test]
+fn apply_edits_merges_one_file_named_two_ways() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("m.py");
+    fs::write(&path, PYTHON).unwrap();
+    let alias = directory.path().join(".").join("m.py");
+    let requests = [
+        FileEdits { file: path.clone(), language: None, edits: vec![edit(4, 7, None, "bar")] },
+        FileEdits { file: alias, language: None, edits: vec![edit(5, 6, None, "x")] },
+    ];
+    assert!(matches!(apply_edits(&requests, false, false), Err(Error::File { .. } | Error::Overlap { .. })));
+    assert_eq!(fs::read_to_string(&path).unwrap(), PYTHON);
+}

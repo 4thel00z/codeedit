@@ -464,6 +464,7 @@ fn trailing_indent(text: &str) -> String {
 struct Rewriter<'found> {
     planned: Vec<Planned<'found>>,
     source: &'found str,
+    language: Language,
 }
 
 impl<'found> Rewriter<'found> {
@@ -521,21 +522,21 @@ impl<'found> Rewriter<'found> {
                 rest = after;
                 continue;
             };
-            let rendered = dedent(&self.render(binding.bytes, found.bytes, depth)?, &indent_at(self.source, binding.bytes[0]));
-            output.push_str(&indent(&rendered, &trailing_indent(&output)));
+            let rendered = dedent(&self.render(binding.bytes, found.bytes, depth)?, &indent_at(self.source, binding.bytes[0]), self.language);
+            output.push_str(&indent(&rendered, &trailing_indent(&output), self.language));
             rest = tail;
         }
         output.push_str(rest);
-        Ok(indent(&output, &indent_at(self.source, found.bytes[0])))
+        Ok(indent(&output, &indent_at(self.source, found.bytes[0]), self.language))
     }
 }
 
 const NESTING: usize = 256;
 
-pub fn edits(planned: &[Planned<'_>], source: &str) -> Result<Vec<Edit>, Error> {
+pub fn edits(planned: &[Planned<'_>], source: &str, language: Language) -> Result<Vec<Edit>, Error> {
     let mut ordered: Vec<Planned<'_>> = planned.to_vec();
     ordered.sort_by_key(|each| (each.found.bytes[0], std::cmp::Reverse(each.found.bytes[1])));
-    let rewriter = Rewriter { planned: ordered, source };
+    let rewriter = Rewriter { planned: ordered, source, language };
     rewriter
         .outermost([0, source.len()], None)
         .into_iter()

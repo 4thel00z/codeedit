@@ -1,7 +1,7 @@
 use std::fs;
 
 use treesitter::symbols::outline;
-use treesitter::tools::{Operation, Position, Request, get, operation_edits, rename, run};
+use treesitter::tools::{Operation, Position, Request, edit_source, get, operation_edits, rename, rename_edits, run};
 use treesitter::{Error, Language, apply, parse};
 
 const PYTHON: &str = "import os\n\n\nclass Greeter:\n    @staticmethod\n    def greet(name):\n        return name\n\n    def wave(self):\n        pass\n\n\ndef main():\n    Greeter.greet(\"x\")\n";
@@ -175,4 +175,152 @@ fn doc_comments_travel_with_their_symbol() {
     let tree = parse(rust.as_bytes(), Language::Rust).unwrap();
     let symbols = outline(&tree, rust.as_bytes(), Language::Rust).unwrap();
     assert_eq!(symbols[0].signature, "#[inline] fn add()");
+}
+
+fn batch(language: Language, source: &str, operations: &[Operation]) -> Result<String, Error> {
+    let borrowed: Vec<&Operation> = operations.iter().collect();
+    Ok(edit_source(source, language, &borrowed, "x", false)?.source)
+}
+
+fn body(symbol: &str, code: &str) -> Operation {
+    Operation::ReplaceBody { symbol: symbol.to_owned(), code: code.to_owned() }
+}
+
+fn insert(symbol: &str, code: &str, position: Position) -> Operation {
+    Operation::Insert { symbol: symbol.to_owned(), code: code.to_owned(), position }
+}
+
+fn delete(symbol: &str) -> Operation {
+    Operation::Delete { symbol: symbol.to_owned() }
+}
+
+fn import(text: &str) -> Operation {
+    Operation::AddImport { import: text.to_owned() }
+}
+
+#[test]
+fn same_file_named_two_ways_keeps_both_edits() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("m.py");
+    fs::write(&path, "def f():\n    return 1\n\n\ndef g():\n    return 2\n").unwrap();
+    let alias = directory.path().join(".").join("m.py");
+    let requests = [
+        Request { file: path.clone(), language: None, operation: body("f", "return 10") },
+        Request { file: alias, language: None, operation: body("g", "return 20") },
+    ];
+    let changes = run(&requests, false, false).unwrap();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(fs::read_to_string(&path).unwrap(), "def f():\n    return 10\n\n\ndef g():\n    return 20\n");
+}
+
+#[test]
+fn brace_free_bodies_ignore_braces_in_literals() {
+    let dictionary = "def f(d):\n    d[\"k\"] = {}\n    return d\n";
+    assert_eq!(
+        batch(Language::Python, dictionary, &[insert("f", "print(d)", Position::End)]).unwrap(),
+        "def f(d):\n    d[\"k\"] = {}\n    return d\n    print(d)\n"
+    );
+    let docstring = "def f():\n    \"\"\"Return {x}.\"\"\"\n    return 1\n";
+    assert_eq!(batch(Language::Python, docstring, &[body("f", "return 2")]).unwrap(), "def f():\n    return 2\n");
+    let arrow = "const f = (xs) => xs.map((y) => { return y; });\n";
+    assert_eq!(batch(Language::JavaScript, arrow, &[body("f", "xs")]).unwrap(), "const f = (xs) => xs;\n");
+}
+
+#[test]
+fn symbols_sharing_a_line_are_edited_alone() {
+    let rust = "fn a() {} fn b() {}\nfn main() { b() }\n";
+    assert_eq!(batch(Language::Rust, rust, &[delete("a")]).unwrap(), "fn b() {}\nfn main() { b() }\n");
+    let inline = "impl P { fn a(&self) {} fn b(&self) {} }\n";
+    assert_eq!(
+        batch(Language::Rust, inline, &[insert("P.b", "fn c(&self) {}", Position::Before)]).unwrap(),
+        "impl P { fn a(&self) {} fn c(&self) {} fn b(&self) {} }\n"
+    );
+    assert_eq!(
+        batch(Language::Rust, inline, &[insert("P.a", "fn c(&self) {}", Position::After)]).unwrap(),
+        "impl P { fn a(&self) {} fn c(&self) {} fn b(&self) {} }\n"
+    );
+}
+
+#[test]
+fn python_one_line_bodies_become_blocks() {
+    let one_line = "def f(): return 1\n";
+    assert_eq!(batch(Language::Python, one_line, &[insert("f", "x = 1", Position::Start)]).unwrap(), "def f():\n    x = 1\n    return 1\n");
+    assert_eq!(batch(Language::Python, one_line, &[insert("f", "x = 1", Position::End)]).unwrap(), "def f():\n    return 1\n    x = 1\n");
+    assert_eq!(batch(Language::Python, one_line, &[body("f", "x = 1\nreturn x")]).unwrap(), "def f():\n    x = 1\n    return x\n");
+    let decorated = "@dec\ndef f(): return 1\n";
+    assert_eq!(batch(Language::Python, decorated, &[body("f", "x = 1\nreturn x")]).unwrap(), "@dec\ndef f():\n    x = 1\n    return x\n");
+    let documented = "def f():\n    \"\"\"Doc.\"\"\"\n    return 1\n";
+    assert_eq!(
+        batch(Language::Python, documented, &[insert("f", "x = 1", Position::Start)]).unwrap(),
+        "def f():\n    \"\"\"Doc.\"\"\"\n    x = 1\n    return 1\n"
+    );
+}
+
+#[test]
+fn multi_line_strings_keep_their_content() {
+    let python = "class Q:\n    def sql(self):\n        return 1\n";
+    assert_eq!(
+        batch(Language::Python, python, &[body("Q.sql", "return \"\"\"\nSELECT *\nFROM t\n\"\"\"")]).unwrap(),
+        "class Q:\n    def sql(self):\n        return \"\"\"\nSELECT *\nFROM t\n\"\"\"\n"
+    );
+    let bash = "f() {\n  echo hi\n}\n";
+    assert_eq!(
+        batch(Language::Bash, bash, &[body("f", "cat <<EOF\nhello\nEOF\necho done")]).unwrap(),
+        "f() {\n  cat <<EOF\nhello\nEOF\n  echo done\n}\n"
+    );
+}
+
+#[test]
+fn rename_covers_destructuring_and_shell_variables() {
+    let javascript = "const { total } = load();\nconsole.log(total + 1);\n";
+    let tree = parse(javascript.as_bytes(), Language::JavaScript).unwrap();
+    let renamed = apply(javascript, Language::JavaScript, &rename_edits(&tree, javascript, "total", "sum"), "x", false).unwrap();
+    assert_eq!(renamed.source, "const { sum } = load();\nconsole.log(sum + 1);\n");
+    let bash = "COUNT=1\necho $COUNT\n";
+    let tree = parse(bash.as_bytes(), Language::Bash).unwrap();
+    let renamed = apply(bash, Language::Bash, &rename_edits(&tree, bash, "COUNT", "N"), "x", false).unwrap();
+    assert_eq!(renamed.source, "N=1\necho $N\n");
+}
+
+#[test]
+fn imports_go_after_file_level_comments() {
+    let rust = "//! Small CLI.\nfn main() {\n    let s = String::new();\n}\n";
+    assert_eq!(
+        batch(Language::Rust, rust, &[import("use std::io;")]).unwrap(),
+        "//! Small CLI.\n\nuse std::io;\nfn main() {\n    let s = String::new();\n}\n"
+    );
+    let javascript = "#!/usr/bin/env node\nrun();\n";
+    assert_eq!(
+        batch(Language::JavaScript, javascript, &[import("import fs from \"fs\";")]).unwrap(),
+        "#!/usr/bin/env node\n\nimport fs from \"fs\";\nrun();\n"
+    );
+}
+
+#[test]
+fn batches_apply_operations_in_order() {
+    let python = "import os\n\n\ndef f():\n    pass\n";
+    assert_eq!(
+        batch(Language::Python, python, &[import("import sys"), import("import sys")]).unwrap(),
+        "import os\nimport sys\n\n\ndef f():\n    pass\n"
+    );
+    let rust = "fn f() {}\n";
+    assert_eq!(
+        batch(Language::Rust, rust, &[insert("f", "a();", Position::Start), insert("f", "b();", Position::End)]).unwrap(),
+        "fn f() {\n    a();\n    b();\n}\n"
+    );
+}
+
+#[test]
+fn go_imports_keep_their_spelling() {
+    let go = "package main\n\nimport \"os\"\n";
+    assert_eq!(batch(Language::Go, go, &[import("importer")]).unwrap(), "package main\n\nimport \"os\"\nimport \"importer\"\n");
+    let grouped = "package main\n\nimport (\"os\")\n";
+    assert_eq!(batch(Language::Go, grouped, &[import("fmt")]).unwrap(), "package main\n\nimport (\n\t\"os\"\n\t\"fmt\"\n)\n");
+}
+
+#[test]
+fn same_path_symbols_are_addressable_by_line() {
+    let python = "class A:\n    @property\n    def x(self):\n        return 1\n\n    @x.setter\n    def x(self, value):\n        pass\n";
+    assert!(matches!(batch(Language::Python, python, &[delete("A.x")]), Err(Error::Ambiguous { .. })));
+    assert_eq!(batch(Language::Python, python, &[delete("A.x:6")]).unwrap(), "class A:\n    @property\n    def x(self):\n        return 1\n");
 }
