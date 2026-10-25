@@ -5,9 +5,9 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use treesitter::files::{self, FileChange, FileEdits};
-use treesitter::tools::{self, Operation, Position, Request};
-use treesitter::{Format, Language, Rule};
+use codeedit::files::{self, FileChange, FileEdits};
+use codeedit::tools::{self, Operation, Position, Request};
+use codeedit::{Format, Language, Rule};
 
 #[derive(Parser)]
 #[command(name = "codeedit", version, about = "Parse, query and edit code in any language")]
@@ -333,8 +333,8 @@ fn run(cli: Cli) -> Result<()> {
         Command::Parse { file, lang, format } => {
             let language = language(&file, lang.as_deref())?;
             let source = input(&file)?;
-            let tree = treesitter::parse(&source, language)?;
-            treesitter::write(&tree, &source, format.into(), &mut out)?;
+            let tree = codeedit::parse(&source, language)?;
+            codeedit::write(&tree, &source, format.into(), &mut out)?;
         }
         Command::Query { paths, query, lang } => {
             let found = files::query(&paths, optional_language(lang.as_deref())?, &query)?;

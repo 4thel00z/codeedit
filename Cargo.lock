@@ -143,11 +143,49 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 name = "codeedit"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "clap",
+ "ignore",
+ "rayon",
+ "regex",
  "serde",
  "serde_json",
- "treesitter",
+ "similar",
+ "tempfile",
+ "thiserror",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-go",
+ "tree-sitter-html",
+ "tree-sitter-javascript",
+ "tree-sitter-json",
+ "tree-sitter-language",
+ "tree-sitter-md",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+ "tree-sitter-xml",
+ "tree-sitter-yaml",
+ "tree-sitter-zig",
+]
+
+[[package]]
+name = "codeedit-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "codeedit",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "codeedit-python"
+version = "0.1.0"
+dependencies = [
+ "codeedit",
+ "pyo3",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -713,44 +751,6 @@ checksum = "ab11fc124851b0db4dd5e55983bbd9631192e93238389dcd44521715e5d53e28"
 dependencies = [
  "cc",
  "tree-sitter-language",
-]
-
-[[package]]
-name = "treesitter"
-version = "0.1.0"
-dependencies = [
- "ignore",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "similar",
- "tempfile",
- "thiserror",
- "tree-sitter",
- "tree-sitter-bash",
- "tree-sitter-go",
- "tree-sitter-html",
- "tree-sitter-javascript",
- "tree-sitter-json",
- "tree-sitter-language",
- "tree-sitter-md",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-typescript",
- "tree-sitter-xml",
- "tree-sitter-yaml",
- "tree-sitter-zig",
-]
-
-[[package]]
-name = "treesitter-python"
-version = "0.1.0"
-dependencies = [
- "pyo3",
- "serde",
- "serde_json",
- "treesitter",
 ]
 
 [[package]]

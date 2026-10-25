@@ -1,5 +1,5 @@
 [package]
-name = "treesitter"
+name = "codeedit"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

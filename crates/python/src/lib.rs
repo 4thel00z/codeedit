@@ -4,11 +4,11 @@ use std::path::PathBuf;
 use pyo3::exceptions::{PyOSError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use serde::Serialize;
-use treesitter::files::{self, FileEdits};
-use treesitter::pattern;
-use treesitter::query::{compile, matches};
-use treesitter::tools::{self, Operation, Request};
-use treesitter::{Edit, Error, Format, Language, Rule};
+use codeedit::files::{self, FileEdits};
+use codeedit::pattern;
+use codeedit::query::{compile, matches};
+use codeedit::tools::{self, Operation, Request};
+use codeedit::{Edit, Error, Format, Language, Rule};
 
 fn to_py(error: Error) -> PyErr {
     let message = error.to_string();
@@ -29,8 +29,8 @@ fn optional_language(language: Option<&str>) -> PyResult<Option<Language>> {
 
 fn render_source(source: &[u8], language: Language, format: &str) -> Result<String, Error> {
     let format: Format = format.parse()?;
-    let tree = treesitter::parse(source, language)?;
-    treesitter::render(&tree, source, format)
+    let tree = codeedit::parse(source, language)?;
+    codeedit::render(&tree, source, format)
 }
 
 #[pyfunction]
@@ -67,7 +67,7 @@ fn query_source(py: Python<'_>, source: &[u8], language: &str, pattern: &str) ->
     let language: Language = language.parse().map_err(to_py)?;
     py.detach(|| {
         let query = compile(language, pattern)?;
-        let tree = treesitter::parse(source, language)?;
+        let tree = codeedit::parse(source, language)?;
         json(&matches(&query, &tree, source))
     })
     .map_err(to_py)
@@ -148,7 +148,7 @@ fn apply(py: Python<'_>, requests: &str, dry_run: bool, allow_errors: bool) -> P
 struct SourceChange {
     source: String,
     #[serde(flatten)]
-    change: treesitter::Change,
+    change: codeedit::Change,
 }
 
 #[pyfunction]
@@ -157,7 +157,7 @@ fn apply_source(py: Python<'_>, source: &str, language: &str, edits: &str, allow
     let language: Language = language.parse().map_err(to_py)?;
     py.detach(|| {
         let edits: Vec<Edit> = serde_json::from_str(edits)?;
-        let change = treesitter::apply(source, language, &edits, "source", allow_errors)?;
+        let change = codeedit::apply(source, language, &edits, "source", allow_errors)?;
         json(&SourceChange {
             source: change.source.clone(),
             change,
@@ -176,7 +176,7 @@ fn outline(py: Python<'_>, path: PathBuf, language: Option<&str>) -> PyResult<St
 #[pyfunction]
 fn outline_source(py: Python<'_>, source: &[u8], language: &str) -> PyResult<String> {
     let language: Language = language.parse().map_err(to_py)?;
-    py.detach(|| json(&treesitter::symbols::outline_source(source, language)?)).map_err(to_py)
+    py.detach(|| json(&codeedit::symbols::outline_source(source, language)?)).map_err(to_py)
 }
 
 #[pyfunction]

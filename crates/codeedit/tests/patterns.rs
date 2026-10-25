@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::fs;
 
-use treesitter::pattern::{Constraint, edits, plan};
-use treesitter::{Error, Found, Language, Pattern, Rule, apply, parse};
+use codeedit::pattern::{Constraint, edits, plan};
+use codeedit::{Error, Found, Language, Pattern, Rule, apply, parse};
 
 fn rule(pattern: &str, rewrite: Option<&str>) -> Rule {
     Rule {
@@ -152,10 +152,10 @@ fn rewrite_files_with_several_rules() {
     let path = directory.path().join("m.py");
     fs::write(&path, "print(a)\nassert x == 1\n").unwrap();
     let rules = [rule("print($$$A)", Some("logger.info($$$A)")), rule("assert $A == $B", Some("assert_equal($A, $B)"))];
-    let changes = treesitter::files::rewrite(std::slice::from_ref(&path), None, &rules, false, false).unwrap();
+    let changes = codeedit::files::rewrite(std::slice::from_ref(&path), None, &rules, false, false).unwrap();
     assert_eq!(changes[0].change.edits, 2);
     assert_eq!(fs::read_to_string(&path).unwrap(), "logger.info(a)\nassert_equal(x, 1)\n");
-    let missing = treesitter::files::rewrite(&[path], None, &[rule("x", None)], true, false);
+    let missing = codeedit::files::rewrite(&[path], None, &[rule("x", None)], true, false);
     assert!(matches!(missing, Err(Error::MissingRewrite)));
 }
 
@@ -165,7 +165,7 @@ fn nested_matches_from_different_rules() {
     let path = directory.path().join("m.py");
     fs::write(&path, "print(open(p).read())\n").unwrap();
     let rules = [rule("print($$$A)", Some("logger.info($$$A)")), rule("open($P).read()", Some("Path($P).read_text()"))];
-    treesitter::files::rewrite(std::slice::from_ref(&path), None, &rules, false, false).unwrap();
+    codeedit::files::rewrite(std::slice::from_ref(&path), None, &rules, false, false).unwrap();
     assert_eq!(fs::read_to_string(&path).unwrap(), "logger.info(Path(p).read_text())\n");
 }
 
@@ -177,13 +177,13 @@ fn mixed_language_directories_skip_languages_the_pattern_does_not_fit() {
     fs::write(directory.path().join("c.sh"), "echo hi\n").unwrap();
     fs::write(directory.path().join("d.py"), [0xff, 0xfe, 0x00]).unwrap();
     let paths = [directory.path().to_path_buf()];
-    let found = treesitter::files::find(&paths, None, &[rule("print($$$A)", None)]).unwrap();
+    let found = codeedit::files::find(&paths, None, &[rule("print($$$A)", None)]).unwrap();
     assert_eq!(found.len(), 1);
-    let queried = treesitter::files::query(&paths, None, "(call) @c").unwrap();
+    let queried = codeedit::files::query(&paths, None, "(call) @c").unwrap();
     assert_eq!(queried.len(), 1);
-    let nothing = treesitter::files::find(&paths, None, &[rule("def (", None)]);
+    let nothing = codeedit::files::find(&paths, None, &[rule("def (", None)]);
     assert!(matches!(nothing, Err(Error::Pattern(_))));
-    let explicit = treesitter::files::find(&[directory.path().join("d.py")], None, &[rule("print($$$A)", None)]);
+    let explicit = codeedit::files::find(&[directory.path().join("d.py")], None, &[rule("print($$$A)", None)]);
     assert!(explicit.is_err());
 }
 

@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::fs;
 
-use treesitter::files::{apply_edits, query, rewrite_query};
-use treesitter::query::{compile, matches};
-use treesitter::{Edit, Error, FileEdits, Language, Request, Rule, apply, parse};
+use codeedit::files::{apply_edits, query, rewrite_query};
+use codeedit::query::{compile, matches};
+use codeedit::{Edit, Error, FileEdits, Language, Request, Rule, apply, parse};
 
 const PYTHON: &str = "def foo(x):\n    return foo(x) + bar(foo)\n";
 
@@ -79,7 +79,7 @@ fn repeated_captures_keep_their_own_text() {
     let tree = parse(source.as_bytes(), Language::Python).unwrap();
     let found = matches(&query, &tree, source.as_bytes());
     let replacements = BTreeMap::from([("dec".to_owned(), "@dec  # audited".to_owned())]);
-    let change = apply(source, Language::Python, &treesitter::rewrite::edits(&found, &replacements, source, Language::Python), "m.py", false).unwrap();
+    let change = apply(source, Language::Python, &codeedit::rewrite::edits(&found, &replacements, source, Language::Python), "m.py", false).unwrap();
     assert_eq!(change.source, "@cache  # audited\n@trace  # audited\ndef f():\n    pass\n");
 }
 
@@ -90,7 +90,7 @@ fn capture_names_stop_at_the_longest_capture() {
     let tree = parse(source.as_bytes(), Language::Python).unwrap();
     let found = matches(&query, &tree, source.as_bytes());
     let replacements = BTreeMap::from([("x".to_owned(), "@x.value".to_owned())]);
-    let change = apply(source, Language::Python, &treesitter::rewrite::edits(&found, &replacements, source, Language::Python), "m.py", false).unwrap();
+    let change = apply(source, Language::Python, &codeedit::rewrite::edits(&found, &replacements, source, Language::Python), "m.py", false).unwrap();
     assert_eq!(change.source, "x.value = 1\n");
 }
 
@@ -101,7 +101,7 @@ fn query_templates_take_the_capture_indentation() {
     let tree = parse(source.as_bytes(), Language::Python).unwrap();
     let found = matches(&query, &tree, source.as_bytes());
     let replacements = BTreeMap::from([("c".to_owned(), "try:\n    @c\nexcept E:\n    pass".to_owned())]);
-    let edits = treesitter::rewrite::edits(&found, &replacements, source, Language::Python);
+    let edits = codeedit::rewrite::edits(&found, &replacements, source, Language::Python);
     let change = apply(source, Language::Python, &edits, "m.py", false).unwrap();
     assert_eq!(change.source, "def f():\n    if x:\n        try:\n            g()\n        except E:\n            pass\n");
 }
@@ -223,18 +223,18 @@ fn writes_are_all_or_nothing_across_files() {
     permissions.set_readonly(true);
     fs::set_permissions(&second, permissions).unwrap();
     let rules = [Rule { pattern: "foo($A)".to_owned(), rewrite: Some("bar($A)".to_owned()), ..Rule::default() }];
-    assert!(treesitter::files::rewrite(&[directory.path().to_path_buf()], None, &rules, false, false).is_err());
+    assert!(codeedit::files::rewrite(&[directory.path().to_path_buf()], None, &rules, false, false).is_err());
     assert_eq!(fs::read_to_string(&first).unwrap(), "foo(1)\n");
     let unchanged = [Rule { pattern: "baz($A)".to_owned(), rewrite: Some("qux($A)".to_owned()), ..Rule::default() }];
-    assert!(treesitter::files::rewrite(std::slice::from_ref(&second), None, &unchanged, false, false).unwrap().is_empty());
+    assert!(codeedit::files::rewrite(std::slice::from_ref(&second), None, &unchanged, false, false).unwrap().is_empty());
 }
 
 #[test]
 fn dot_and_xml_output() {
     let tree = parse(b"x = \"a\"\ndef f(:\n", Language::Python).unwrap();
-    let dot = treesitter::format::render(&tree, b"x = \"a\"\ndef f(:\n", treesitter::Format::Dot).unwrap();
+    let dot = codeedit::format::render(&tree, b"x = \"a\"\ndef f(:\n", codeedit::Format::Dot).unwrap();
     assert!(!dot.contains("\\\\\""), "{dot}");
-    let xml = treesitter::format::render(&tree, b"x = \"a\"\ndef f(:\n", treesitter::Format::Xml).unwrap();
+    let xml = codeedit::format::render(&tree, b"x = \"a\"\ndef f(:\n", codeedit::Format::Xml).unwrap();
     assert!(xml.contains("missing=\"true\""), "{xml}");
 }
 
@@ -242,7 +242,7 @@ fn dot_and_xml_output() {
 fn json_errors_with_only_tokens_keep_their_text() {
     let source = b"def f():\n    return )\n";
     let tree = parse(source, Language::Python).unwrap();
-    let json: serde_json::Value = serde_json::from_str(&treesitter::format::render(&tree, source, treesitter::Format::Json).unwrap()).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&codeedit::format::render(&tree, source, codeedit::Format::Json).unwrap()).unwrap();
     let text = json.to_string();
     assert!(text.contains(r#""error":true"#) && text.contains(r#""text":"return )""#), "{text}");
 }
@@ -251,7 +251,7 @@ fn json_errors_with_only_tokens_keep_their_text() {
 fn markdown_json_includes_inline_nodes() {
     let source = b"# Title\n\nsome *em* and [a link](http://x)\n";
     let tree = parse(source, Language::Markdown).unwrap();
-    let json = treesitter::format::render(&tree, source, treesitter::Format::Json).unwrap();
+    let json = codeedit::format::render(&tree, source, codeedit::Format::Json).unwrap();
     let value: serde_json::Value = serde_json::from_str(&json).unwrap();
     let text = value.to_string();
     assert!(text.contains(r#""type":"emphasis""#) && text.contains(r#""type":"inline_link""#), "{text}");

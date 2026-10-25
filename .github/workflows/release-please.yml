@@ -67,7 +67,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: cargo build --release --locked -p codeedit --target ${{ matrix.target }}
+      - run: cargo build --release --locked -p codeedit-cli --target ${{ matrix.target }}
       - name: Package
         shell: bash
         env:

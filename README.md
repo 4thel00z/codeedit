@@ -43,7 +43,7 @@ Agents edit code with `sed` and hand-counted line ranges, and break it. codeedit
 
 ```bash
 pip install codeedit                                            # Python package, abi3 wheels for 3.13+
-cargo install --git https://github.com/4thel00z/codeedit codeedit   # the `codeedit` binary
+cargo install --git https://github.com/4thel00z/codeedit codeedit-cli   # the `codeedit` binary
 ```
 
 Prebuilt `codeedit` binaries for Linux, macOS and Windows are attached to every [release](https://github.com/4thel00z/codeedit/releases).
@@ -109,7 +109,7 @@ Release build on an Apple M3 Pro:
 ```bash
 uv sync                                  # builds the extension into .venv
 uv run pytest
-cargo test --workspace --exclude treesitter-python
+cargo test --workspace --exclude codeedit-python
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 

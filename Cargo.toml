@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/treesitter", "crates/cli", "crates/python"]
+members = ["crates/codeedit", "crates/cli", "crates/python"]
 exclude = ["vendor"]
 resolver = "3"
 
@@ -12,7 +12,7 @@ rust-version = "1.90"
 [workspace.dependencies]
 tree-sitter = { path = "vendor/tree-sitter/lib" }
 tree-sitter-language = { path = "vendor/tree-sitter/language" }
-treesitter = { path = "crates/treesitter" }
+codeedit = { path = "crates/codeedit" }
 
 [workspace.lints.clippy]
 unwrap_used = "deny"

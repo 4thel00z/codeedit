@@ -1,8 +1,8 @@
 use std::fs;
 
-use treesitter::symbols::outline;
-use treesitter::tools::{Operation, Position, Request, edit_source, get, operation_edits, rename, rename_edits, run};
-use treesitter::{Error, Language, apply, parse};
+use codeedit::symbols::outline;
+use codeedit::tools::{Operation, Position, Request, edit_source, get, operation_edits, rename, rename_edits, run};
+use codeedit::{Error, Language, apply, parse};
 
 const PYTHON: &str = "import os\n\n\nclass Greeter:\n    @staticmethod\n    def greet(name):\n        return name\n\n    def wave(self):\n        pass\n\n\ndef main():\n    Greeter.greet(\"x\")\n";
 
