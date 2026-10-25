@@ -1,6 +1,6 @@
 [project]
 name = "codeedit"
-version = "0.1.0"
+version = "1.0.0"
 description = "Parse code in any language, dump its syntax tree as JSON, and apply structured edits"
 license = "MIT"
 requires-python = ">=3.13"
