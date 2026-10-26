@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/4thel00z/codeedit/compare/v1.0.0...v1.0.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **build:** include LICENSE in the sdist ([b4fdfad](https://github.com/4thel00z/codeedit/commit/b4fdfadb681cdcb48bd431986ec6c19b177ed756))
+* **build:** publish the README as the PyPI description ([e9598d1](https://github.com/4thel00z/codeedit/commit/e9598d188666b09b4ceb8fe13761c3ab440fb8c6))
+
 ## [1.0.0](https://github.com/4thel00z/codeedit/compare/v0.1.0...v1.0.0) (2026-10-25)
 
 
