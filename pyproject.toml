@@ -2,10 +2,17 @@
 name = "codeedit"
 version = "1.0.0"
 description = "Parse code in any language, dump its syntax tree as JSON, and apply structured edits"
+readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.13"
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/4thel00z/codeedit"
+Source = "https://github.com/4thel00z/codeedit"
+Issues = "https://github.com/4thel00z/codeedit/issues"
+Changelog = "https://github.com/4thel00z/codeedit/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = ["pytest>=8"]

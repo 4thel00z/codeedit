@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.svg" alt="codeedit" width="180">
+  <img src="https://raw.githubusercontent.com/4thel00z/codeedit/main/logo.svg" alt="codeedit" width="180">
 </p>
 
 <h1 align="center">codeedit</h1>
@@ -14,7 +14,7 @@
   <a href="https://pypi.org/project/codeedit/"><img src="https://img.shields.io/pypi/v/codeedit?logo=pypi&logoColor=white" alt="PyPI"></a>
   <img src="https://img.shields.io/badge/python-3.13%2B-3776ab?logo=python&logoColor=white" alt="Python 3.13+">
   <img src="https://img.shields.io/badge/rust-2024-000000?logo=rust&logoColor=white" alt="Rust 2024">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
+  <a href="https://github.com/4thel00z/codeedit/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
 </p>
 
 <p align="center">
@@ -88,7 +88,7 @@ change = codeedit.rewrite_source("foo(1)\n", "python", "foo($A)", "bar($A)")
 
 ## Agent skill
 
-[`.claude/skills/codeedit/SKILL.md`](.claude/skills/codeedit/SKILL.md) teaches a coding agent every command and its pitfalls. Link it into your agent's skill directory:
+[`.claude/skills/codeedit/SKILL.md`](https://github.com/4thel00z/codeedit/blob/main/.claude/skills/codeedit/SKILL.md) teaches a coding agent every command and its pitfalls. Link it into your agent's skill directory:
 
 ```bash
 ln -s "$PWD/.claude/skills/codeedit" ~/.claude/skills/codeedit
@@ -117,4 +117,4 @@ CI runs clippy, tests on Linux and macOS, pytest, a wheel and a binary smoke tes
 
 ## License
 
-MIT. The vendored [tree-sitter](vendor/tree-sitter) runtime and all grammars are MIT as well; see [`vendor/tree-sitter/UPSTREAM`](vendor/tree-sitter/UPSTREAM) for the one local patch.
+MIT. The vendored [tree-sitter](https://github.com/4thel00z/codeedit/tree/main/vendor/tree-sitter) runtime and all grammars are MIT as well; see [`vendor/tree-sitter/UPSTREAM`](https://github.com/4thel00z/codeedit/blob/main/vendor/tree-sitter/UPSTREAM) for the one local patch.
