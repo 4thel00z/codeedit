@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/4thel00z/codeedit/compare/v1.1.0...v1.2.0) (2026-10-27)
+
+
+### Features
+
+* **patterns:** metavariables inside tokens and hidden text, Dockerfile patterns ([3b6f111](https://github.com/4thel00z/codeedit/commit/3b6f111ebc5c48159740f3e75baa7afa4c4aa57b))
+
+
+### Bug Fixes
+
+* **build:** vendor tree-sitter-scss so the Windows binary and wheel build ([751cdb1](https://github.com/4thel00z/codeedit/commit/751cdb14c52c5af9c2b4ee8665dd8a4129bea5d6))
+
 ## [1.1.0](https://github.com/4thel00z/codeedit/compare/v1.0.1...v1.1.0) (2026-10-27)
 
 
