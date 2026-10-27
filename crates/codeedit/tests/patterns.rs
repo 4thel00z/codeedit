@@ -311,3 +311,40 @@ fn patterns_in_more_languages() {
     let found = try_find(Language::Swift, &rule("return $E", None), swift).unwrap();
     assert_eq!(found[0].bindings["E"].text, "g(1)");
 }
+
+#[test]
+fn dockerfile_patterns() {
+    let dockerfile = "ARG VERSION=1\nFROM alpine:3 AS base\nENV FOO=bar\nRUN apk add git\nCOPY . /app\nFROM base AS final\n";
+    let found = try_find(Language::Dockerfile, &rule("FROM $IMAGE AS $STAGE", None), dockerfile).unwrap();
+    let stages: Vec<&str> = found.iter().map(|each| each.bindings["STAGE"].text.as_str()).collect();
+    assert_eq!(stages, ["base", "final"]);
+    let found = try_find(Language::Dockerfile, &rule("RUN $CMD", None), dockerfile).unwrap();
+    assert_eq!(found[0].bindings["CMD"].text, "apk add git");
+    let found = try_find(Language::Dockerfile, &rule("ENV $K=$V", None), dockerfile).unwrap();
+    assert_eq!((found[0].bindings["K"].text.as_str(), found[0].bindings["V"].text.as_str()), ("FOO", "bar"));
+    let rewritten = try_rewrite(Language::Dockerfile, &rule("COPY $SRC $DST", Some("COPY --chown=app $SRC $DST")), dockerfile).unwrap();
+    assert!(rewritten.contains("COPY --chown=app . /app\n"), "{rewritten}");
+    let rewritten = try_rewrite(Language::Dockerfile, &rule("ARG $A=$V", Some("ARG $A=2")), dockerfile).unwrap();
+    assert!(rewritten.starts_with("ARG VERSION=2\n"), "{rewritten}");
+}
+
+#[test]
+fn metavariables_inside_tokens() {
+    let dockerfile = "FROM alpine:3 AS base\nRUN apk add git curl\nCOPY --from=base /a /b\n";
+    let found = try_find(Language::Dockerfile, &rule("FROM $I:$T AS $S", None), dockerfile).unwrap();
+    assert_eq!((found[0].bindings["I"].text.as_str(), found[0].bindings["T"].text.as_str()), ("alpine", "3"));
+    let found = try_find(Language::Dockerfile, &rule("RUN apk add $PKGS", None), dockerfile).unwrap();
+    assert_eq!(found[0].bindings["PKGS"].text, "git curl");
+    let found = try_find(Language::Dockerfile, &rule("COPY --from=$STAGE $SRC $DST", None), dockerfile).unwrap();
+    assert_eq!(found[0].bindings["STAGE"].text, "base");
+    let rewritten = try_rewrite(Language::Dockerfile, &rule("FROM $I:$T AS $S", Some("FROM $I:$T-slim AS $S")), dockerfile).unwrap();
+    assert!(rewritten.starts_with("FROM alpine:3-slim AS base\n"), "{rewritten}");
+    let python = "log(\"user bob\")\nlog(\"other\")\n";
+    let found = try_find(Language::Python, &rule("log(\"user $NAME\")", None), python).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].bindings["NAME"].text, "bob");
+    let cmake = "set(MAX_SIZE 10)\nset(MAX_OTHER 10)\n";
+    let found = try_find(Language::CMake, &rule("set(MAX_SIZE $V)", None), cmake).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].bindings["V"].text, "10");
+}

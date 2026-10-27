@@ -80,6 +80,7 @@ Get byte ranges from `outline`, `get`, `find` or `parse`, and pass `expect` so a
 - In zsh, `echo '...\n...'` turns `\n` into a real newline and breaks JSON. Use a heredoc or `printf '%s'`.
 - `rename` renames every identifier with that spelling, including unrelated ones. Preview with `-n`.
 - In PHP and SCSS, `$NAME` in a pattern is always a metavariable, so a literal `$FOO` variable cannot be matched; lowercase `$foo` stays literal.
+- A metavariable inside a single token binds that part of the token: `RUN apk add $PKGS` in a Dockerfile, `FROM $IMAGE:$TAG AS $STAGE`, `COPY --from=$STAGE $SRC $DST`, or `log("user $NAME")` matching the string content. The `$` must start a word, so `MAX_SIZE` stays literal in languages whose sigil is `_`. Dockerfile `EXPOSE` and `USER` take literals only.
 - A metavariable cannot stand in for a TOML or INI value (`name = $V` does not parse); spell the value out, or use `query` with `(pair (bare_key) @k (_) @v)`.
 - `add-import` works in Python, Rust, Go, JS/TS, Zig, Ruby, Crystal, PHP, C, C++, Java, Kotlin, Swift, C#, Scala, Dart, Lua, Haskell, OCaml, Protobuf, CSS and SCSS; other languages report it as unsupported.
 - Without `-l`, a directory walk skips files whose language the pattern does not parse in; it errors only if no language fits.
