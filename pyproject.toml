@@ -1,6 +1,6 @@
 [project]
 name = "codeedit"
-version = "1.0.1"
+version = "1.1.0"
 description = "Structural code edits for coding agents: a better sed that reads the syntax tree"
 readme = "README.md"
 license = "MIT"

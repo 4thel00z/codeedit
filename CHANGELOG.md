@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/4thel00z/codeedit/compare/v1.0.1...v1.1.0) (2026-10-27)
+
+
+### Features
+
+* support 27 more languages, from SQL and Terraform to Java, C++ and Ruby ([b9f8b59](https://github.com/4thel00z/codeedit/commit/b9f8b591adcfe40d4cda3efb59d4dbf0c8ae9cb8))
+
 ## [1.0.1](https://github.com/4thel00z/codeedit/compare/v1.0.0...v1.0.1) (2026-10-26)
 
 
