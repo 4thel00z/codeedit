@@ -141,7 +141,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "codeedit"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "ignore",
  "rayon",
@@ -196,7 +196,7 @@ dependencies = [
 
 [[package]]
 name = "codeedit-cli"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "codeedit-python"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "codeedit",
  "pyo3",
