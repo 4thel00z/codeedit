@@ -1,0 +1,20 @@
+[package]
+name = "tree-sitter-scss"
+description = "SCSS grammar for tree-sitter"
+version = "1.0.0"
+authors = ["Amaan Qureshi <amaanq12@gmail.com>"]
+license = "MIT"
+keywords = ["incremental", "parsing", "tree-sitter", "scss"]
+categories = ["parsing", "text-editors"]
+repository = "https://github.com/tree-sitter-grammars/tree-sitter-scss"
+edition = "2021"
+build = "bindings/rust/build.rs"
+
+[lib]
+path = "bindings/rust/lib.rs"
+
+[dependencies]
+tree-sitter-language = "0.1"
+
+[build-dependencies]
+cc = "1.0.92"

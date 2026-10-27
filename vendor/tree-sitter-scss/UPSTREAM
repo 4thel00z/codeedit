@@ -1,0 +1,6 @@
+Vendored from the tree-sitter-scss 1.0.0 crate (https://github.com/tree-sitter-grammars/tree-sitter-scss, MIT as declared in its Cargo.toml).
+Contents: src/ (generated parser and scanner), grammar.js, queries/ and bindings/rust/.
+
+Local patches:
+- bindings/rust/build.rs: -Wno-unused-parameter is passed with flag_if_supported, so MSVC no longer fails on it.
+- Cargo.toml and bindings/rust/lib.rs: the crate exports a `LanguageFn` through tree-sitter-language instead of linking the tree-sitter runtime, like every other grammar.

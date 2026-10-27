@@ -117,4 +117,4 @@ CI runs clippy, tests on Linux and macOS, pytest, a wheel and a binary smoke tes
 
 ## License
 
-MIT. The vendored [tree-sitter](https://github.com/4thel00z/codeedit/tree/main/vendor/tree-sitter) runtime, the vendored [Dockerfile grammar](https://github.com/4thel00z/codeedit/tree/main/vendor/tree-sitter-dockerfile) and all other grammars are MIT as well; each `vendor/*/UPSTREAM` file lists the commit and local patches.
+MIT. The vendored [tree-sitter](https://github.com/4thel00z/codeedit/tree/main/vendor/tree-sitter) runtime, the vendored [Dockerfile](https://github.com/4thel00z/codeedit/tree/main/vendor/tree-sitter-dockerfile) and [SCSS](https://github.com/4thel00z/codeedit/tree/main/vendor/tree-sitter-scss) grammars and all other grammars are MIT as well; each `vendor/*/UPSTREAM` file lists the commit and local patches.

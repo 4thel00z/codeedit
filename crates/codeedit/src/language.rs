@@ -170,7 +170,7 @@ impl Language {
             Self::Ruby => tree_sitter_ruby::LANGUAGE,
             Self::Rust => tree_sitter_rust::LANGUAGE,
             Self::Scala => tree_sitter_scala::LANGUAGE,
-            Self::Scss => return tree_sitter_scss::language(),
+            Self::Scss => tree_sitter_scss::LANGUAGE,
             Self::Sql => tree_sitter_sequel::LANGUAGE,
             Self::Swift => tree_sitter_swift::LANGUAGE,
             Self::Toml => tree_sitter_toml_ng::LANGUAGE,
