@@ -95,6 +95,273 @@ const XML: &str = r"
 (element (EmptyElemTag (Name) @name)) @definition.element
 ";
 
+const RUBY: &str = r"
+(class name: (_) @name) @definition.class
+(module name: (_) @name) @definition.module
+(method name: (_) @name) @definition.method
+(singleton_method name: (_) @name) @definition.method
+(assignment left: (constant) @name) @definition.constant
+";
+
+const CRYSTAL: &str = r"
+(class_def name: (_) @name) @definition.class
+(struct_def name: (_) @name) @definition.struct
+(module_def name: (_) @name) @definition.module
+(enum_def name: (_) @name) @definition.enum
+(lib_def name: (_) @name) @definition.module
+(annotation_def name: (_) @name) @definition.class
+(method_def name: (_) @name) @definition.method
+(macro_def name: (_) @name) @definition.macro
+(fun_def name: (_) @name) @definition.function
+(const_assign lhs: (_) @name) @definition.constant
+";
+
+const PHP: &str = r"
+(class_declaration name: (_) @name) @definition.class
+(interface_declaration name: (_) @name) @definition.interface
+(trait_declaration name: (_) @name) @definition.trait
+(enum_declaration name: (_) @name) @definition.enum
+(namespace_definition name: (_) @name) @definition.module
+(function_definition name: (_) @name) @definition.function
+(method_declaration name: (_) @name) @definition.method
+(const_declaration (const_element (name) @name)) @definition.constant
+(property_declaration (property_element name: (_) @name)) @definition.field
+(enum_case name: (_) @name) @definition.constant
+";
+
+const C: &str = r"
+(function_definition declarator: (_) @declarator) @definition.function
+(struct_specifier name: (_) @name body: (_)) @definition.struct
+(union_specifier name: (_) @name body: (_)) @definition.union
+(enum_specifier name: (_) @name body: (_)) @definition.enum
+(type_definition declarator: (type_identifier) @name) @definition.type
+(preproc_def name: (_) @name) @definition.macro
+(preproc_function_def name: (_) @name) @definition.macro
+";
+
+const CPP: &str = r"
+(function_definition declarator: (_) @declarator) @definition.function
+(field_declaration_list (field_declaration declarator: (function_declarator) @declarator) @definition.method)
+(field_declaration_list (declaration declarator: (function_declarator) @declarator) @definition.method)
+(class_specifier name: (_) @name body: (_)) @definition.class
+(struct_specifier name: (_) @name body: (_)) @definition.struct
+(union_specifier name: (_) @name body: (_)) @definition.union
+(enum_specifier name: (_) @name body: (_)) @definition.enum
+(namespace_definition name: (_) @name) @definition.module
+(type_definition declarator: (type_identifier) @name) @definition.type
+(alias_declaration name: (_) @name) @definition.type
+(concept_definition name: (_) @name) @definition.concept
+(preproc_def name: (_) @name) @definition.macro
+(preproc_function_def name: (_) @name) @definition.macro
+";
+
+const JAVA: &str = r"
+(class_declaration name: (_) @name) @definition.class
+(interface_declaration name: (_) @name) @definition.interface
+(enum_declaration name: (_) @name) @definition.enum
+(record_declaration name: (_) @name) @definition.record
+(annotation_type_declaration name: (_) @name) @definition.annotation
+(method_declaration name: (_) @name) @definition.method
+(constructor_declaration name: (_) @name) @definition.constructor
+(field_declaration declarator: (variable_declarator name: (_) @name)) @definition.field
+(enum_constant name: (_) @name) @definition.constant
+";
+
+const KOTLIN: &str = r#"
+(class_declaration "class" name: (_) @name) @definition.class
+(class_declaration "interface" name: (_) @name) @definition.interface
+(object_declaration name: (_) @name) @definition.object
+(companion_object name: (_) @name) @definition.object
+(function_declaration name: (_) @name) @definition.function
+(property_declaration (variable_declaration (identifier) @name)) @definition.property
+(type_alias type: (_) @name) @definition.type
+"#;
+
+const SWIFT: &str = r#"
+(class_declaration "class" name: (_) @name) @definition.class
+(class_declaration "actor" name: (_) @name) @definition.class
+(class_declaration "struct" name: (_) @name) @definition.struct
+(class_declaration "enum" name: (_) @name) @definition.enum
+(class_declaration "extension" name: (_) @name) @definition.extension
+(protocol_declaration name: (_) @name) @definition.protocol
+(function_declaration name: (simple_identifier) @name) @definition.function
+(protocol_function_declaration name: (simple_identifier) @name) @definition.method
+(init_declaration "init" @name) @definition.constructor
+(deinit_declaration "deinit" @name) @definition.method
+(property_declaration name: (pattern bound_identifier: (simple_identifier) @name)) @definition.property
+(typealias_declaration name: (type_identifier) @name) @definition.type
+"#;
+
+const CSHARP: &str = r"
+(class_declaration name: (_) @name) @definition.class
+(struct_declaration name: (_) @name) @definition.struct
+(interface_declaration name: (_) @name) @definition.interface
+(enum_declaration name: (_) @name) @definition.enum
+(record_declaration name: (_) @name) @definition.record
+(namespace_declaration name: (_) @name) @definition.module
+(file_scoped_namespace_declaration name: (_) @name) @definition.module
+(method_declaration name: (_) @name) @definition.method
+(constructor_declaration name: (_) @name) @definition.constructor
+(destructor_declaration name: (_) @name) @definition.method
+(local_function_statement name: (_) @name) @definition.function
+(property_declaration name: (_) @name) @definition.property
+(field_declaration (variable_declaration (variable_declarator name: (_) @name))) @definition.field
+(event_field_declaration (variable_declaration (variable_declarator name: (_) @name))) @definition.field
+(delegate_declaration name: (_) @name) @definition.type
+(enum_member_declaration name: (_) @name) @definition.constant
+";
+
+const SCALA: &str = r"
+(class_definition name: (_) @name) @definition.class
+(object_definition name: (_) @name) @definition.object
+(trait_definition name: (_) @name) @definition.trait
+(enum_definition name: (_) @name) @definition.enum
+(type_definition name: (_) @name) @definition.type
+(function_definition name: (_) @name) @definition.function
+(function_declaration name: (_) @name) @definition.function
+(val_definition pattern: (identifier) @name) @definition.variable
+(var_definition pattern: (identifier) @name) @definition.variable
+(val_declaration name: (identifier) @name) @definition.variable
+(var_declaration name: (identifier) @name) @definition.variable
+";
+
+const DART: &str = r"
+(class_declaration name: (_) @name) @definition.class
+(mixin_declaration name: (_) @name) @definition.mixin
+(enum_declaration name: (_) @name) @definition.enum
+(extension_declaration name: (_) @name) @definition.extension
+(function_declaration signature: (function_signature name: (identifier) @name)) @definition.function
+(method_declaration signature: (method_signature [(function_signature name: (identifier) @name) (getter_signature name: (identifier) @name) (setter_signature name: (identifier) @name)])) @definition.method
+(declaration (constructor_signature name: (identifier) @name)) @definition.constructor
+(declaration (initialized_identifier_list (initialized_identifier name: (identifier) @name))) @definition.field
+(declaration (static_final_declaration_list (static_final_declaration name: (identifier) @name))) @definition.field
+(top_level_variable_declaration (static_final_declaration_list (static_final_declaration name: (identifier) @name))) @definition.variable
+(top_level_variable_declaration (initialized_identifier_list (initialized_identifier name: (identifier) @name))) @definition.variable
+(type_alias (type_identifier) @name) @definition.type
+(enum_entry name: (identifier) @name) @definition.constant
+";
+
+const DOCKERFILE: &str = r"
+(from_instruction (image_alias) @name) @definition.stage
+(arg_instruction name: (_) @name) @definition.variable
+(env_pair name: (_) @name) @definition.variable
+";
+
+const LUA: &str = r"
+(function_declaration name: (_) @name) @definition.function
+(chunk (variable_declaration (assignment_statement (variable_list name: (identifier) @name))) @definition.variable)
+(chunk (assignment_statement (variable_list name: (_) @name)) @definition.variable)
+";
+
+const ELIXIR: &str = r#"
+((call target: (identifier) @keyword (arguments (alias) @name) (do_block)) @definition.module (#match? @keyword "^(defmodule|defprotocol|defimpl)$"))
+((call target: (identifier) @keyword (arguments . [(call target: (identifier) @name) (identifier) @name])) @definition.function (#match? @keyword "^(def|defp|defmacro|defmacrop|defguard|defguardp|defdelegate)$"))
+"#;
+
+const HASKELL: &str = r"
+(signature name: (variable) @name) @definition.signature
+(function name: (variable) @name) @definition.function
+(bind name: (variable) @name) @definition.function
+(data_type name: (name) @name) @definition.type
+(newtype name: (name) @name) @definition.type
+(type_synonym name: (name) @name) @definition.type
+(type_family name: (name) @name) @definition.type
+(class name: (name) @name) @definition.class
+(instance name: (name) @name patterns: (_) @patterns) @definition.instance
+";
+
+const OCAML: &str = r"
+(value_definition (let_binding pattern: (value_name) @name (parameter))) @definition.function
+(value_definition (let_binding pattern: (value_name) @name . body: (_))) @definition.variable
+(type_definition (type_binding name: (type_constructor) @name)) @definition.type
+(module_definition (module_binding (module_name) @name)) @definition.module
+(module_type_definition (module_type_name) @name) @definition.module
+(exception_definition (constructor_declaration (constructor_name) @name)) @definition.exception
+(external (value_name) @name) @definition.function
+";
+
+const NIX: &str = r"
+(binding attrpath: (attrpath) @name) @definition.key
+";
+
+const PROTO: &str = r"
+(message (message_name (identifier) @name)) @definition.message
+(enum (enum_name (identifier) @name)) @definition.enum
+(service (service_name (identifier) @name)) @definition.service
+(rpc (rpc_name (identifier) @name)) @definition.method
+(field (identifier) @name) @definition.field
+(enum_field (identifier) @name) @definition.constant
+";
+
+const GRAPHQL: &str = r"
+(object_type_definition (name) @name) @definition.type
+(interface_type_definition (name) @name) @definition.interface
+(enum_type_definition (name) @name) @definition.enum
+(input_object_type_definition (name) @name) @definition.type
+(union_type_definition (name) @name) @definition.union
+(scalar_type_definition (name) @name) @definition.type
+(directive_definition (name) @name) @definition.directive
+(operation_definition (name) @name) @definition.operation
+(fragment_definition (fragment_name (name) @name)) @definition.fragment
+(field_definition (name) @name) @definition.field
+";
+
+const INI: &str = r"
+(section (section_name (text) @name)) @definition.section
+(setting (setting_name) @name) @definition.key
+";
+
+const TOML: &str = r"
+(table . [(bare_key) (dotted_key) (quoted_key)] @name) @definition.table
+(table_array_element . [(bare_key) (dotted_key) (quoted_key)] @name) @definition.table
+(pair . [(bare_key) (dotted_key) (quoted_key)] @name) @definition.key
+";
+
+const HCL: &str = r"
+(block . (identifier) @name (string_lit)* @label) @definition.block
+(attribute . (identifier) @name) @definition.key
+";
+
+const MAKE: &str = r"
+(rule (targets) @name) @definition.target
+(variable_assignment name: (_) @name) @definition.variable
+(define_directive name: (_) @name) @definition.variable
+";
+
+const CMAKE: &str = r#"
+(function_def (function_command (argument_list . (argument) @name))) @definition.function
+(macro_def (macro_command (argument_list . (argument) @name))) @definition.macro
+((normal_command (identifier) @command (argument_list . (argument) @name)) @definition.variable (#match? @command "^(?i)(set|option)$"))
+"#;
+
+const CSS: &str = r"
+(rule_set (selectors) @name) @definition.rule
+(media_statement) @definition.media
+(supports_statement) @definition.supports
+(keyframes_statement (keyframes_name) @name) @definition.keyframes
+";
+
+const SCSS: &str = r"
+(rule_set (selectors) @name) @definition.rule
+(media_statement) @definition.media
+(keyframes_statement (keyframes_name) @name) @definition.keyframes
+(mixin_statement name: (_) @name) @definition.mixin
+(function_statement name: (_) @name) @definition.function
+(stylesheet (declaration (property_name) @name) @definition.variable)
+";
+
+const SQL: &str = r"
+(create_table (object_reference name: (identifier) @name)) @definition.table
+(create_view (object_reference name: (identifier) @name)) @definition.view
+(create_materialized_view (object_reference name: (identifier) @name)) @definition.view
+(create_index column: (identifier) @name) @definition.index
+(create_function (object_reference name: (identifier) @name)) @definition.function
+(create_type (object_reference name: (identifier) @name)) @definition.type
+(create_schema (identifier) @name) @definition.schema
+(create_sequence (object_reference name: (identifier) @name)) @definition.sequence
+(column_definition name: (identifier) @name) @definition.column
+";
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Symbol {
     pub name: String,
@@ -122,25 +389,178 @@ fn definitions(language: Language) -> &'static str {
         Language::Markdown => MARKDOWN,
         Language::Html => HTML,
         Language::Xml => XML,
+        Language::Ruby => RUBY,
+        Language::Crystal => CRYSTAL,
+        Language::Php => PHP,
+        Language::C => C,
+        Language::Cpp => CPP,
+        Language::Java => JAVA,
+        Language::Kotlin => KOTLIN,
+        Language::Swift => SWIFT,
+        Language::CSharp => CSHARP,
+        Language::Scala => SCALA,
+        Language::Dart => DART,
+        Language::Dockerfile => DOCKERFILE,
+        Language::Lua => LUA,
+        Language::Elixir => ELIXIR,
+        Language::Haskell => HASKELL,
+        Language::OCaml => OCAML,
+        Language::Nix => NIX,
+        Language::Proto => PROTO,
+        Language::GraphQL => GRAPHQL,
+        Language::Ini => INI,
+        Language::Toml => TOML,
+        Language::Hcl => HCL,
+        Language::Make => MAKE,
+        Language::CMake => CMAKE,
+        Language::Css => CSS,
+        Language::Scss => SCSS,
+        Language::Sql => SQL,
     }
 }
 
-fn definition_body<'tree>(kind: &str, node: Node<'tree>) -> Option<Node<'tree>> {
-    match kind {
-        "constant" | "variable" | "section" | "element" => None,
-        "key" => node.child_by_field_name("value"),
-        _ => body(node, 3),
+pub(crate) fn block_bodies(language: Language) -> bool {
+    matches!(
+        language,
+        Language::Python
+            | Language::Ruby
+            | Language::Crystal
+            | Language::Lua
+            | Language::Elixir
+            | Language::Make
+            | Language::CMake
+            | Language::Hcl
+    )
+}
+
+const BODY_KINDS: &[&str] = &[
+    "class_body",
+    "enum_class_body",
+    "enum_body",
+    "interface_body",
+    "annotation_type_body",
+    "constructor_body",
+    "declaration_list",
+    "enum_declaration_list",
+    "field_declaration_list",
+    "enumerator_list",
+    "template_body",
+    "protocol_body",
+    "extension_body",
+    "body_statement",
+    "do_block",
+    "expressions",
+    "message_body",
+    "service_body",
+    "fields_definition",
+    "enum_values_definition",
+    "input_fields_definition",
+    "selection_set",
+    "keyframe_block_list",
+    "recipe",
+    "block",
+    "compound_statement",
+    "function_body",
+    "body",
+    "statements",
+];
+
+fn named_body(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .find(|child| BODY_KINDS.contains(&child.kind()))
+}
+
+fn inner_range(node: Node<'_>, source: &[u8]) -> Option<[usize; 2]> {
+    if node.kind() == "do_block" {
+        let first = node.named_child(0)?;
+        let mut cursor = node.walk();
+        let last = node.named_children(&mut cursor).last()?;
+        return Some([first.start_byte(), last.end_byte()]);
     }
+    if node.kind() == "function_body" {
+        let mut cursor = node.walk();
+        if let Some(block) = node
+            .named_children(&mut cursor)
+            .find(|child| child.kind() == "block")
+        {
+            return Some([block.start_byte(), block.end_byte()]);
+        }
+        if !text(node, source).starts_with('{') && node.named_child_count() == 1 {
+            let child = node.named_child(0)?;
+            return Some([child.start_byte(), child.end_byte()]);
+        }
+    }
+    Some([node.start_byte(), node.end_byte()])
+}
+
+fn trimmed(range: [usize; 2], source: &[u8]) -> Option<[usize; 2]> {
+    let content = source.get(range[0]..range[1])?;
+    let leading = content
+        .iter()
+        .take_while(|byte| byte.is_ascii_whitespace())
+        .count();
+    let trailing = content
+        .iter()
+        .rev()
+        .take_while(|byte| byte.is_ascii_whitespace())
+        .count();
+    if leading + trailing >= content.len() {
+        return Some([range[0], range[0]]);
+    }
+    Some([range[0] + leading, range[1] - trailing])
+}
+
+fn key_value(node: Node<'_>) -> Option<Node<'_>> {
+    if let Some(value) = node
+        .child_by_field_name("value")
+        .or_else(|| node.child_by_field_name("expression"))
+    {
+        return Some(value);
+    }
+    if node.named_child_count() < 2 {
+        return None;
+    }
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).last()
+}
+
+fn definition_body(
+    language: Language,
+    kind: &str,
+    node: Node<'_>,
+    source: &[u8],
+) -> Option<[usize; 2]> {
+    let found = match kind {
+        "constant" | "variable" | "section" | "element" | "field" | "property" | "table"
+        | "column" | "index" | "sequence" | "signature" => return None,
+        "key" => key_value(node)?,
+        _ if language == Language::Haskell => node
+            .child_by_field_name("match")
+            .and_then(|found| found.child_by_field_name("expression"))?,
+        _ => node
+            .child_by_field_name("body")
+            .or_else(|| named_body(node))
+            .or_else(|| body(node, 3))?,
+    };
+    trimmed(inner_range(found, source)?, source)
 }
 
 fn query(language: Language) -> Result<&'static Query, Error> {
-    static QUERIES: [OnceLock<Result<Query, String>>; Language::ALL.len()] = [const { OnceLock::new() }; Language::ALL.len()];
+    static QUERIES: [OnceLock<Result<Query, String>>; Language::ALL.len()] =
+        [const { OnceLock::new() }; Language::ALL.len()];
     let unsupported = || Error::Unsupported(format!("symbols are not available for {language}"));
     let source = definitions(language);
-    let index = Language::ALL.iter().position(|each| *each == language).ok_or_else(unsupported)?;
+    let index = Language::ALL
+        .iter()
+        .position(|each| *each == language)
+        .ok_or_else(unsupported)?;
     let slot = QUERIES.get(index).ok_or_else(unsupported)?;
-    let compiled = slot.get_or_init(|| Query::new(&language.grammar(), source).map_err(|error| error.to_string()));
-    compiled.as_ref().map_err(|message| Error::Pattern(message.clone()))
+    let compiled = slot
+        .get_or_init(|| Query::new(&language.grammar(), source).map_err(|error| error.to_string()));
+    compiled
+        .as_ref()
+        .map_err(|message| Error::Pattern(message.clone()))
 }
 
 fn wrapper(language: Language, node: Node<'_>) -> bool {
@@ -152,14 +572,25 @@ fn wrapper(language: Language, node: Node<'_>) -> bool {
             "lexical_declaration" | "variable_declaration" => single,
             _ => false,
         },
-        Language::Go => matches!(node.kind(), "type_declaration" | "const_declaration" | "var_declaration") && single,
+        Language::Go => {
+            matches!(
+                node.kind(),
+                "type_declaration" | "const_declaration" | "var_declaration"
+            ) && single
+        }
+        Language::Cpp => node.kind() == "template_declaration",
+        Language::Dart => node.kind() == "member_declaration",
+        Language::Sql => node.kind() == "statement",
         _ => false,
     }
 }
 
 fn own_line(node: Node<'_>, source: &[u8]) -> bool {
     let head = source.get(..node.start_byte()).unwrap_or_default();
-    let line = head.rsplit(|byte| *byte == b'\n').next().unwrap_or_default();
+    let line = head
+        .rsplit(|byte| *byte == b'\n')
+        .next()
+        .unwrap_or_default();
     line.iter().all(u8::is_ascii_whitespace)
 }
 
@@ -168,21 +599,40 @@ fn doc_comment(language: Language, node: Node<'_>, source: &[u8]) -> bool {
         return false;
     }
     let content = text(node, source);
+    let javadoc = content.starts_with("/**") && !content.starts_with("/***");
+    let triple =
+        (content.starts_with("///") && !content.starts_with("////")) || content.starts_with("//!");
     match (language, node.kind()) {
-        (Language::Rust, "line_comment" | "block_comment") => {
-            (content.starts_with("///") && !content.starts_with("////")) || content.starts_with("/**")
-        }
+        (Language::Rust, "line_comment" | "block_comment") => triple || javadoc,
         (Language::Zig, "comment") => content.starts_with("///"),
-        (Language::Go, "comment") => true,
-        (Language::JavaScript | Language::TypeScript | Language::Tsx, "comment") => content.starts_with("/**"),
+        (Language::Go | Language::Ruby | Language::Crystal, "comment") => true,
+        (
+            Language::JavaScript
+            | Language::TypeScript
+            | Language::Tsx
+            | Language::Php
+            | Language::Kotlin
+            | Language::Scala
+            | Language::Java,
+            "comment" | "block_comment",
+        ) => javadoc,
+        (
+            Language::C | Language::Cpp | Language::Swift | Language::CSharp,
+            "comment" | "multiline_comment",
+        ) => javadoc || triple,
+        (Language::Dart, "documentation_comment") => true,
+        (Language::Haskell, "haddock") => true,
+        (Language::OCaml, "comment") => content.starts_with("(**") && !content.starts_with("(***"),
+        (Language::Lua, "comment") => content.starts_with("---"),
         _ => false,
     }
 }
 
-fn attribute(language: Language, node: Node<'_>) -> bool {
+fn attribute(language: Language, node: Node<'_>, source: &[u8]) -> bool {
     match language {
         Language::Rust => node.kind() == "attribute_item",
         Language::JavaScript | Language::TypeScript | Language::Tsx => node.kind() == "decorator",
+        Language::Elixir => node.kind() == "unary_operator" && text(node, source).starts_with('@'),
         _ => false,
     }
 }
@@ -203,7 +653,7 @@ fn extent<'tree>(language: Language, node: Node<'tree>, source: &[u8]) -> Extent
     let mut previous = outer.prev_sibling();
     while let Some(sibling) = previous {
         let adjacent = sibling.end_position().row + 1 >= first.start_position().row;
-        let is_attribute = attribute(language, sibling);
+        let is_attribute = attribute(language, sibling, source);
         if !adjacent || !(is_attribute || doc_comment(language, sibling, source)) {
             break;
         }
@@ -224,7 +674,10 @@ fn body(node: Node<'_>, depth: usize) -> Option<Node<'_>> {
     if let Some(found) = node.child_by_field_name("body") {
         return Some(found);
     }
-    if matches!(node.kind(), "struct_declaration" | "enum_declaration" | "union_declaration" | "opaque_declaration") {
+    if matches!(
+        node.kind(),
+        "struct_declaration" | "enum_declaration" | "union_declaration" | "opaque_declaration"
+    ) {
         return Some(node);
     }
     if depth == 0 {
@@ -232,7 +685,9 @@ fn body(node: Node<'_>, depth: usize) -> Option<Node<'_>> {
     }
     let mut cursor = node.walk();
     let children: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
-    children.into_iter().find_map(|child| body(child, depth - 1))
+    children
+        .into_iter()
+        .find_map(|child| body(child, depth - 1))
 }
 
 fn clean_name(kind: &str, raw: &str) -> String {
@@ -241,7 +696,53 @@ fn clean_name(kind: &str, raw: &str) -> String {
         return trimmed.to_owned();
     }
     let generic = trimmed.find(['<', '[']).filter(|index| *index > 0);
-    generic.and_then(|index| trimmed.get(..index)).unwrap_or(trimmed).trim().to_owned()
+    generic
+        .and_then(|index| trimmed.get(..index))
+        .unwrap_or(trimmed)
+        .trim()
+        .to_owned()
+}
+
+fn head_text(node: Node<'_>, source: &[u8]) -> String {
+    let content = text(node, source);
+    let head = content.split(['{', '\n']).next().unwrap_or_default();
+    head.trim().to_owned()
+}
+
+struct Declared {
+    receiver: Option<String>,
+    name: String,
+}
+
+fn declared(node: Node<'_>, source: &[u8]) -> Declared {
+    let mut current = node;
+    loop {
+        let inner = match current.kind() {
+            "parenthesized_declarator" => current.named_child(0),
+            _ => current.child_by_field_name("declarator"),
+        };
+        let Some(inner) = inner else {
+            break;
+        };
+        current = inner;
+    }
+    if current.kind() != "qualified_identifier" {
+        return Declared {
+            receiver: None,
+            name: text(current, source).into_owned(),
+        };
+    }
+    let scope = current
+        .child_by_field_name("scope")
+        .map(|scope| clean_name("method", &text(scope, source)).replace("::", "."));
+    let name = current.child_by_field_name("name").map_or_else(
+        || text(current, source).into_owned(),
+        |name| declared(name, source).name,
+    );
+    Declared {
+        receiver: scope,
+        name,
+    }
 }
 
 struct Definition {
@@ -254,6 +755,29 @@ struct Definition {
     body: Option<[usize; 2]>,
     start: [usize; 2],
     end: [usize; 2],
+}
+
+fn title(
+    language: Language,
+    kind: &str,
+    name: &str,
+    node: Node<'_>,
+    source: &[u8],
+) -> Option<String> {
+    match (language, kind) {
+        (_, "impl") => {
+            let implemented = node
+                .child_by_field_name("trait")
+                .map(|node| clean_name("impl", &text(node, source)));
+            Some(implemented.map_or_else(
+                || format!("impl {name}"),
+                |implemented| format!("impl {implemented} for {name}"),
+            ))
+        }
+        (Language::Swift, "extension") => Some(format!("extension {name}")),
+        (Language::Scala, "object") => Some(format!("object {name}")),
+        _ => None,
+    }
 }
 
 pub fn outline_source(source: &[u8], language: Language) -> Result<Vec<Symbol>, Error> {
@@ -272,44 +796,119 @@ pub fn outline(tree: &Tree, source: &[u8], language: Language) -> Result<Vec<Sym
         let mut definition = None;
         let mut name = None;
         let mut receiver = None;
+        let mut labels = Vec::new();
         for capture in each.captures() {
-            let label = names.get(capture.index as usize).copied().unwrap_or_default();
+            let label = names
+                .get(capture.index as usize)
+                .copied()
+                .unwrap_or_default();
             match label {
                 "name" => name = Some(text(capture.node, source).into_owned()),
                 "receiver" => receiver = Some(clean_name("method", &text(capture.node, source))),
-                _ => definition = label.strip_prefix("definition.").map(|kind| (kind, capture.node)),
+                "declarator" => {
+                    let Declared {
+                        receiver: scope,
+                        name: declared,
+                    } = declared(capture.node, source);
+                    receiver = scope;
+                    name = Some(declared);
+                }
+                "label" | "patterns" => labels.push(clean_name("", &text(capture.node, source))),
+                _ => {
+                    if let Some(kind) = label.strip_prefix("definition.") {
+                        definition = Some((kind, capture.node));
+                    }
+                }
             }
         }
-        let (Some((kind, node)), Some(name)) = (definition, name) else {
+        let Some((kind, node)) = definition else {
             continue;
         };
-        let Extent { first, signature, last } = extent(language, node, source);
+        let name = clean_name(kind, &name.unwrap_or_else(|| head_text(node, source)));
+        let Extent {
+            first,
+            signature,
+            last,
+        } = extent(language, node, source);
         let bytes = [first.start_byte(), last.end_byte()];
-        let name = clean_name(kind, &name);
+        let (name, title) = match kind {
+            "instance" => (
+                labels.join(" "),
+                Some(format!("instance {name} {}", labels.join(" "))),
+            ),
+            _ => {
+                let name = std::iter::once(name)
+                    .chain(labels)
+                    .collect::<Vec<_>>()
+                    .join(".");
+                let title = title(language, kind, &name, node, source);
+                (name, title)
+            }
+        };
         if !seen.insert((bytes, name.clone())) {
             continue;
         }
         let start = first.start_position();
         let end = last.end_position();
-        let title = (kind == "impl").then(|| {
-            let implemented = node.child_by_field_name("trait").map(|node| clean_name("impl", &text(node, source)));
-            implemented.map_or_else(|| format!("impl {name}"), |implemented| format!("impl {implemented} for {name}"))
-        });
         found.push(Definition {
             signature_start: signature.start_byte(),
-            name,
             title,
+            name,
             kind: kind.to_owned(),
             receiver,
             bytes,
-            body: definition_body(kind, node).map(|body| [body.start_byte(), body.end_byte()]),
+            body: definition_body(language, kind, node, source),
             start: [start.row, start.column],
             end: [end.row, end.column],
         });
     }
     found.sort_by_key(|definition| (definition.bytes[0], std::cmp::Reverse(definition.bytes[1])));
+    if language == Language::Haskell {
+        found = merged_equations(found);
+    }
     Ok(nest(found, source))
 }
+
+fn merged_equations(found: Vec<Definition>) -> Vec<Definition> {
+    let mut merged: Vec<Definition> = Vec::with_capacity(found.len());
+    for definition in found {
+        let equation = matches!(definition.kind.as_str(), "signature" | "function");
+        let previous = merged.last_mut().filter(|previous| {
+            equation
+                && previous.name == definition.name
+                && matches!(previous.kind.as_str(), "signature" | "function")
+        });
+        let Some(previous) = previous else {
+            merged.push(definition);
+            continue;
+        };
+        previous.bytes[1] = definition.bytes[1];
+        previous.end = definition.end;
+        previous.kind = "function".to_owned();
+        previous.body = None;
+    }
+    for definition in &mut merged {
+        if definition.kind == "signature" {
+            definition.kind = "function".to_owned();
+        }
+    }
+    merged
+}
+
+const OWNERS: &[&str] = &[
+    "class",
+    "impl",
+    "trait",
+    "struct",
+    "extension",
+    "interface",
+    "object",
+    "protocol",
+    "enum",
+    "record",
+    "mixin",
+    "annotation",
+];
 
 fn nest(found: Vec<Definition>, source: &[u8]) -> Vec<Symbol> {
     let mut symbols: Vec<Symbol> = Vec::with_capacity(found.len());
@@ -319,23 +918,42 @@ fn nest(found: Vec<Definition>, source: &[u8]) -> Vec<Symbol> {
         while stack
             .last()
             .and_then(|index| symbols.get(*index))
-            .is_some_and(|parent| parent.bytes[1] <= definition.bytes[0] || parent.bytes == definition.bytes)
+            .is_some_and(|parent| {
+                parent.bytes[1] <= definition.bytes[0] || parent.bytes == definition.bytes
+            })
         {
             stack.pop();
         }
         let parent = stack.last().and_then(|index| symbols.get(*index));
+        if parent.is_some_and(|parent| parent.kind == "type" && parent.name == definition.name) {
+            continue;
+        }
         let mut kind = definition.kind;
-        if kind == "function" && parent.is_some_and(|parent| matches!(parent.kind.as_str(), "class" | "impl" | "trait")) {
+        let owned = definition.receiver.is_some()
+            || parent.is_some_and(|parent| OWNERS.contains(&parent.kind.as_str()));
+        if kind == "function" && owned {
             kind = "method".to_owned();
         }
         let scope = stack.last().and_then(|index| scopes.get(*index)).cloned();
         let prefix = definition.receiver.or(scope);
-        let scoped = prefix.map_or_else(|| definition.name.clone(), |prefix| format!("{prefix}.{}", definition.name));
+        let scoped = prefix.map_or_else(
+            || definition.name.clone(),
+            |prefix| format!("{prefix}.{}", definition.name),
+        );
         scopes.push(scoped.clone());
         let path = definition.title.unwrap_or(scoped);
         let signature_end = definition.body.map_or(definition.bytes[1], |body| body[0]);
-        let signature = String::from_utf8_lossy(source.get(definition.signature_start..signature_end).unwrap_or_default());
-        let signature = signature.lines().map(str::trim).filter(|line| !line.is_empty()).collect::<Vec<_>>().join(" ");
+        let signature = String::from_utf8_lossy(
+            source
+                .get(definition.signature_start..signature_end)
+                .unwrap_or_default(),
+        );
+        let signature = signature
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
         stack.push(symbols.len());
         symbols.push(Symbol {
             name: definition.name,
@@ -364,7 +982,7 @@ fn candidates<'symbols>(symbols: &'symbols [Symbol], wanted: &str) -> Vec<&'symb
 }
 
 fn without_impls(candidates: Vec<&Symbol>) -> Vec<&Symbol> {
-    let preferred: Vec<&Symbol> = candidates.iter().copied().filter(|symbol| symbol.kind != "impl").collect();
+    let preferred: Vec<&Symbol> = candidates.iter().copied().filter(|symbol| !matches!(symbol.kind.as_str(), "impl" | "extension" | "instance")).collect();
     if preferred.is_empty() {
         return candidates;
     }

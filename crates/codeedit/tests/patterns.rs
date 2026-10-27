@@ -280,3 +280,34 @@ fn patterns_match_inside_rust_macros() {
     let rewritten = try_rewrite(Language::Rust, &rule("$E.unwrap()", Some("$E?")), source).unwrap();
     assert_eq!(rewritten, "fn t() {\n    assert!(edits(a, b).is_err());\n    let v = vec![x?, y];\n}\n");
 }
+
+#[test]
+fn patterns_in_more_languages() {
+    let java = "class A {\n    int f(int x) {\n        return g(x);\n    }\n}\n";
+    let found = try_find(Language::Java, &rule("return $E;", None), java).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].bindings["E"].text, "g(x)");
+    let rewritten = try_rewrite(Language::Java, &rule("g($A)", Some("h($A)")), java).unwrap();
+    assert!(rewritten.contains("return h(x);"), "{rewritten}");
+    let ruby = "def f(x)\n  puts x\n  puts \"y\"\nend\n";
+    let found = try_find(Language::Ruby, &rule("puts $A", None), ruby).unwrap();
+    assert_eq!(found.len(), 2);
+    let php = "<?php\nfunction f($name) {\n    return strtoupper($name);\n}\n";
+    let rewritten = try_rewrite(Language::Php, &rule("strtoupper($A)", Some("mb_strtoupper($A)")), php).unwrap();
+    assert!(rewritten.contains("return mb_strtoupper($name);"), "{rewritten}");
+    let c = "int main(void) {\n    printf(\"%d\", 1);\n    return 0;\n}\n";
+    let found = try_find(Language::C, &rule("printf($$$ARGS)", None), c).unwrap();
+    assert_eq!(found[0].bindings["ARGS"].text, "\"%d\", 1");
+    let terraform = "resource \"a\" \"b\" {\n  ami = \"x\"\n  count = 1\n}\n";
+    let found = try_find(Language::Hcl, &rule("ami = $V", None), terraform).unwrap();
+    assert_eq!(found[0].bindings["V"].text, "\"x\"");
+    let sql = "CREATE TABLE a (id INT);\nCREATE TABLE b (id INT);\n";
+    let found = try_find(Language::Sql, &rule("CREATE TABLE $T ($$$C)", None), sql).unwrap();
+    assert_eq!(found.len(), 2);
+    let lua = "local a = require(\"a\")\nlocal b = require(\"b\")\n";
+    let found = try_find(Language::Lua, &rule("require($M)", None), lua).unwrap();
+    assert_eq!(found.len(), 2);
+    let swift = "func f() -> Int {\n    return g(1)\n}\n";
+    let found = try_find(Language::Swift, &rule("return $E", None), swift).unwrap();
+    assert_eq!(found[0].bindings["E"].text, "g(1)");
+}

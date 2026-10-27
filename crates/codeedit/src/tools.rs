@@ -195,7 +195,7 @@ fn body(source: &str, language: Language, symbol: &Symbol) -> Result<Body, Error
         let head = source.get(line..start).unwrap_or_default();
         let shape = match (language, inline) {
             (Language::Python, true) => Shape::Inline,
-            (Language::Python, false) => Shape::Block,
+            (_, false) if crate::symbols::block_bodies(language) => Shape::Block,
             _ => Shape::Expression,
         };
         let inner = match shape {
@@ -638,10 +638,59 @@ fn zig_imports<'tree>(tree: &'tree Tree, source: &str) -> Vec<Node<'tree>> {
         .collect()
 }
 
+fn top_level_containing<'tree>(tree: &'tree Tree, source: &str, kinds: &[&str], needle: &str) -> Vec<Node<'tree>> {
+    top_level(tree, kinds)
+        .into_iter()
+        .filter(|node| source.get(node.byte_range()).is_some_and(|text| text.trim_start().starts_with(needle)))
+        .collect()
+}
+
+fn lua_requires<'tree>(tree: &'tree Tree, source: &str) -> Vec<Node<'tree>> {
+    top_level_containing(tree, source, &["variable_declaration"], "local")
+        .into_iter()
+        .filter(|node| source.get(node.byte_range()).is_some_and(|text| text.contains("require")))
+        .collect()
+}
+
+fn c_includes<'tree>(tree: &'tree Tree) -> Vec<Node<'tree>> {
+    let direct = top_level(tree, &["preproc_include"]);
+    if !direct.is_empty() {
+        return direct;
+    }
+    let guarded = top_level(tree, &["preproc_ifdef", "preproc_if"]);
+    let Some(guard) = guarded.first() else {
+        return direct;
+    };
+    let mut cursor = guard.walk();
+    guard.named_children(&mut cursor).filter(|node| node.kind() == "preproc_include").collect()
+}
+
+fn add_haskell_import(tree: &Tree, source: &str, import: &str) -> Option<Edit> {
+    let root = tree.root_node();
+    let imports = root.child_by_field_name("imports");
+    let existing: Vec<Node<'_>> = imports
+        .map(|node| {
+            let mut cursor = node.walk();
+            node.named_children(&mut cursor).filter(|child| child.kind() == "import").collect()
+        })
+        .unwrap_or_default();
+    if already_imported(&existing, source, import) {
+        return None;
+    }
+    if let Some(edit) = after_last(&existing, source, import) {
+        return Some(edit);
+    }
+    let mut cursor = root.walk();
+    let header = root.named_children(&mut cursor).find(|node| node.kind() == "header");
+    let position = header.map_or(0, |node| end_of_line(source, node.end_byte()));
+    Some(at_top(tree, source, Language::Haskell, position, import))
+}
+
 pub fn add_import(tree: &Tree, source: &str, language: Language, import: &str) -> Result<Option<Edit>, Error> {
     let import = import.trim();
     let (imports, preamble): (Vec<Node<'_>>, &[&str]) = match language {
         Language::Go => return Ok(add_go_import(tree, source, import)),
+        Language::Haskell => return Ok(add_haskell_import(tree, source, import)),
         Language::Python => (
             top_level(tree, &["import_statement", "import_from_statement", "future_import_statement"]),
             &["comment"],
@@ -649,6 +698,21 @@ pub fn add_import(tree: &Tree, source: &str, language: Language, import: &str) -
         Language::Rust => (top_level(tree, &["use_declaration", "extern_crate_declaration"]), &["line_comment", "block_comment", "inner_attribute_item"]),
         Language::JavaScript | Language::TypeScript | Language::Tsx => (top_level(tree, &["import_statement"]), &["comment", "hash_bang_line"]),
         Language::Zig => (zig_imports(tree, source), &["comment"]),
+        Language::Ruby => (top_level_containing(tree, source, &["call"], "require"), &["comment"]),
+        Language::Crystal => (top_level(tree, &["require"]), &["comment"]),
+        Language::Php => (top_level(tree, &["namespace_use_declaration"]), &["php_tag", "comment", "declare_statement", "namespace_definition"]),
+        Language::C | Language::Cpp => (c_includes(tree), &["comment", "preproc_call"]),
+        Language::Java => (top_level(tree, &["import_declaration"]), &["package_declaration", "block_comment", "line_comment"]),
+        Language::Kotlin => (top_level(tree, &["import"]), &["package_header", "block_comment", "line_comment", "file_annotation"]),
+        Language::Swift => (top_level(tree, &["import_declaration"]), &["comment", "multiline_comment"]),
+        Language::CSharp => (top_level(tree, &["using_directive"]), &["comment"]),
+        Language::Scala => (top_level(tree, &["import_declaration"]), &["package_clause", "block_comment", "comment"]),
+        Language::Dart => (top_level(tree, &["import_or_export"]), &["comment", "documentation_comment", "library_name"]),
+        Language::OCaml => (top_level(tree, &["open_module"]), &["comment"]),
+        Language::Lua => (lua_requires(tree, source), &["comment"]),
+        Language::Proto => (top_level(tree, &["import"]), &["syntax", "package", "comment"]),
+        Language::Css => (top_level(tree, &["import_statement"]), &["comment"]),
+        Language::Scss => (top_level(tree, &["use_statement", "forward_statement", "import_statement"]), &["comment"]),
         _ => return Err(Error::Unsupported(format!("add_import is not available for {language}"))),
     };
     if already_imported(&imports, source, import) {

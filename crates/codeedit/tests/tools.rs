@@ -39,7 +39,7 @@ fn outlines() {
         pairs(&[("Store", "class"), ("Store.get", "method"), ("handler", "function"), ("Options", "interface")])
     );
     let zig = "const Point = struct {\n    pub fn len(self: Point) i32 { return 0; }\n};\npub fn main() void {}\n";
-    assert_eq!(paths(Language::Zig, zig).unwrap(), pairs(&[("Point", "struct"), ("Point.len", "function"), ("main", "function")]));
+    assert_eq!(paths(Language::Zig, zig).unwrap(), pairs(&[("Point", "struct"), ("Point.len", "method"), ("main", "function")]));
     assert_eq!(paths(Language::Bash, "build() {\n  make\n}\n").unwrap(), pairs(&[("build", "function")]));
     assert!(paths(Language::Json, "{}").unwrap().is_empty());
 }
@@ -421,4 +421,89 @@ fn json_and_yaml_keys_can_be_edited() {
     let yaml = "a:\n  b: 1\nc: [1]\n";
     assert_eq!(batch(Language::Yaml, yaml, &[body("a.b", "2")]).unwrap(), "a:\n  b: 2\nc: [1]\n");
     assert_eq!(batch(Language::Yaml, yaml, &[delete("a")]).unwrap(), "c: [1]\n");
+}
+
+#[test]
+fn outlines_more_languages() {
+    let ruby = "module Greet\n  class Greeter\n    def self.build(name)\n      new(name)\n    end\n\n    def greet(name)\n      puts name\n    end\n  end\nend\n";
+    assert_eq!(paths(Language::Ruby, ruby).unwrap(), pairs(&[("Greet", "module"), ("Greet.Greeter", "class"), ("Greet.Greeter.build", "method"), ("Greet.Greeter.greet", "method")]));
+    let java = "class Greeter {\n    private int x = 1;\n\n    /** Greets. */\n    @Override\n    public String greet(String name) {\n        return name;\n    }\n}\n";
+    assert_eq!(paths(Language::Java, java).unwrap(), pairs(&[("Greeter", "class"), ("Greeter.x", "field"), ("Greeter.greet", "method")]));
+    let c = "#define MAX 10\n\ntypedef struct Point {\n    int x;\n} Point;\n\nstatic int *helper(int x) {\n    return &x;\n}\n";
+    assert_eq!(paths(Language::C, c).unwrap(), pairs(&[("MAX", "macro"), ("Point", "type"), ("helper", "function")]));
+    let cpp = "template <typename T>\nclass Greeter {\n    void greet(T name) const;\n};\n\ntemplate <typename T>\nvoid Greeter<T>::greet(T name) const {}\n";
+    assert_eq!(paths(Language::Cpp, cpp).unwrap(), pairs(&[("Greeter", "class"), ("Greeter.greet", "method"), ("Greeter.greet", "method")]));
+    let terraform = "resource \"aws_instance\" \"web\" {\n  ami = \"abc\"\n}\n\nvariable \"region\" {\n  default = \"eu\"\n}\n";
+    assert_eq!(
+        paths(Language::Hcl, terraform).unwrap(),
+        pairs(&[("resource.aws_instance.web", "block"), ("resource.aws_instance.web.ami", "key"), ("variable.region", "block"), ("variable.region.default", "key")])
+    );
+    let sql = "CREATE TABLE users (\n    id INT PRIMARY KEY,\n    name TEXT\n);\n\nCREATE INDEX users_name ON users (name);\n";
+    assert_eq!(paths(Language::Sql, sql).unwrap(), pairs(&[("users", "table"), ("users.id", "column"), ("users.name", "column"), ("users_name", "index")]));
+    let elixir = "defmodule App.Greeter do\n  @doc \"Greets.\"\n  def greet(name) do\n    IO.puts(name)\n  end\nend\n";
+    assert_eq!(paths(Language::Elixir, elixir).unwrap(), pairs(&[("App.Greeter", "module"), ("App.Greeter.greet", "function")]));
+    let haskell = "greet :: String -> String\ngreet name = name\n\ndata Point = Point Int\n";
+    assert_eq!(paths(Language::Haskell, haskell).unwrap(), pairs(&[("greet", "function"), ("Point", "type")]));
+    let toml = "[package]\nname = \"x\"\n\n[[bin]]\nname = \"y\"\n";
+    assert_eq!(paths(Language::Toml, toml).unwrap(), pairs(&[("package", "table"), ("package.name", "key"), ("bin", "table"), ("bin.name", "key")]));
+    let dockerfile = "ARG VERSION=1\nFROM alpine:3 AS base\nENV FOO=bar\nFROM base AS final\n";
+    assert_eq!(paths(Language::Dockerfile, dockerfile).unwrap(), pairs(&[("VERSION", "variable"), ("base", "stage"), ("FOO", "variable"), ("final", "stage")]));
+    let scala = "class Greeter {\n  def greet(): Int = 1\n}\nobject Greeter {\n  def apply(): Greeter = new Greeter\n}\n";
+    assert_eq!(paths(Language::Scala, scala).unwrap(), pairs(&[("Greeter", "class"), ("Greeter.greet", "method"), ("object Greeter", "object"), ("Greeter.apply", "method")]));
+}
+
+#[test]
+fn languages_from_file_names() {
+    assert_eq!(Language::from_path(std::path::Path::new("Makefile")).unwrap(), Language::Make);
+    assert_eq!(Language::from_path(std::path::Path::new("src/CMakeLists.txt")).unwrap(), Language::CMake);
+    assert_eq!(Language::from_path(std::path::Path::new("Gemfile")).unwrap(), Language::Ruby);
+    assert_eq!(Language::from_path(std::path::Path::new("docker/Dockerfile.dev")).unwrap(), Language::Dockerfile);
+    assert_eq!(Language::from_path(std::path::Path::new("main.tf")).unwrap(), Language::Hcl);
+    assert_eq!(Language::from_path(std::path::Path::new("a.h")).unwrap(), Language::C);
+    assert_eq!(Language::from_path(std::path::Path::new("a.hpp")).unwrap(), Language::Cpp);
+    assert_eq!("terraform".parse::<Language>().unwrap(), Language::Hcl);
+}
+
+#[test]
+fn edits_in_block_body_languages() {
+    let ruby = "class Greeter\n  def greet(name)\n    puts name\n  end\nend\n";
+    let replaced = edit(Language::Ruby, ruby, Operation::ReplaceBody { symbol: "Greeter.greet".into(), code: "puts \"hi\"".into() }).unwrap();
+    assert_eq!(replaced, "class Greeter\n  def greet(name)\n    puts \"hi\"\n  end\nend\n");
+    let inserted = edit(Language::Ruby, ruby, Operation::Insert { symbol: "Greeter.greet".into(), code: "puts \"bye\"".into(), position: Position::End }).unwrap();
+    assert_eq!(inserted, "class Greeter\n  def greet(name)\n    puts name\n    puts \"bye\"\n  end\nend\n");
+    let elixir = "defmodule A do\n  def f(x) do\n    x\n  end\nend\n";
+    let replaced = edit(Language::Elixir, elixir, Operation::ReplaceBody { symbol: "A.f".into(), code: "x + 1".into() }).unwrap();
+    assert_eq!(replaced, "defmodule A do\n  def f(x) do\n    x + 1\n  end\nend\n");
+    let kotlin = "class A {\n    fun f(x: Int): Int {\n        return x\n    }\n\n    fun g() = 1\n}\n";
+    let replaced = edit(Language::Kotlin, kotlin, Operation::ReplaceBody { symbol: "A.f".into(), code: "return x + 1".into() }).unwrap();
+    assert_eq!(replaced, "class A {\n    fun f(x: Int): Int {\n        return x + 1\n    }\n\n    fun g() = 1\n}\n");
+    let replaced = edit(Language::Kotlin, kotlin, Operation::ReplaceBody { symbol: "A.g".into(), code: "2".into() }).unwrap();
+    assert_eq!(replaced, "class A {\n    fun f(x: Int): Int {\n        return x\n    }\n\n    fun g() = 2\n}\n");
+    let terraform = "resource \"a\" \"b\" {\n  ami = \"x\"\n}\n";
+    let replaced = edit(Language::Hcl, terraform, Operation::ReplaceBody { symbol: "resource.a.b.ami".into(), code: "\"y\"".into() }).unwrap();
+    assert_eq!(replaced, "resource \"a\" \"b\" {\n  ami = \"y\"\n}\n");
+    let makefile = "build: main.c\n\t$(CC) main.c\n\ntest:\n\t./main\n";
+    let replaced = edit(Language::Make, makefile, Operation::ReplaceBody { symbol: "build".into(), code: "$(CC) -O2 main.c".into() }).unwrap();
+    assert_eq!(replaced, "build: main.c\n\t$(CC) -O2 main.c\n\ntest:\n\t./main\n");
+}
+
+#[test]
+fn add_import_in_more_languages() {
+    let java = "package app;\n\nimport java.util.List;\n\nclass A {}\n";
+    let edited = edit(Language::Java, java, Operation::AddImport { import: "import java.util.Map;".into() }).unwrap();
+    assert_eq!(edited, "package app;\n\nimport java.util.List;\nimport java.util.Map;\n\nclass A {}\n");
+    let c = "#include <stdio.h>\n\nint main(void) { return 0; }\n";
+    let edited = edit(Language::C, c, Operation::AddImport { import: "#include <string.h>".into() }).unwrap();
+    assert_eq!(edited, "#include <stdio.h>\n#include <string.h>\n\nint main(void) { return 0; }\n");
+    let ruby = "# frozen_string_literal: true\n\nclass A; end\n";
+    let edited = edit(Language::Ruby, ruby, Operation::AddImport { import: "require \"json\"".into() }).unwrap();
+    assert_eq!(edited, "# frozen_string_literal: true\n\nrequire \"json\"\n\nclass A; end\n");
+    let haskell = "module Main where\n\nmain :: IO ()\nmain = pure ()\n";
+    let edited = edit(Language::Haskell, haskell, Operation::AddImport { import: "import Data.Char".into() }).unwrap();
+    assert_eq!(edited, "module Main where\n\nimport Data.Char\n\nmain :: IO ()\nmain = pure ()\n");
+    let php = "<?php\n\nnamespace App;\n\nuse App\\A;\n\nclass B {}\n";
+    let edited = edit(Language::Php, php, Operation::AddImport { import: "use App\\C;".into() }).unwrap();
+    assert_eq!(edited, "<?php\n\nnamespace App;\n\nuse App\\A;\nuse App\\C;\n\nclass B {}\n");
+    let unsupported = edit(Language::Toml, "a = 1\n", Operation::AddImport { import: "x".into() });
+    assert!(matches!(unsupported, Err(Error::Unsupported(_))));
 }

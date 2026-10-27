@@ -1,0 +1,5 @@
+Vendored from https://github.com/camdencheek/tree-sitter-dockerfile at commit 971acdd908568b4531b0ba28a445bf0bb720aba5 (MIT, see LICENSE).
+Contents: src/ (generated parser and scanner), grammar.js, and bindings/rust/.
+
+Local patches:
+- Cargo.toml and bindings/rust/lib.rs: the crate exports a `LanguageFn` through tree-sitter-language instead of linking the tree-sitter 0.24 runtime, so it builds against the vendored runtime like every other grammar.

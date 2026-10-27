@@ -35,9 +35,9 @@ Agents edit code with `sed` and hand-counted line ranges, and break it. codeedit
 - **Edit by pattern**: `$E.unwrap()` → `$E?` across a directory; `$A` matches one node, `$$$A` any number, `where` filters by regex or node type.
 - **Safe by default**: stale, overlapping or syntax-breaking edits are rejected; multi-file changes are written all or nothing.
 - **Syntax tree as JSON**: every node with type, field, position, byte range and text; also S-expression, XML and Graphviz.
-- **Structure beyond code**: outlines and key edits for JSON and YAML, sections for Markdown, elements for HTML and XML; Markdown JSON dumps include inline nodes.
+- **Structure beyond code**: outlines and key edits for JSON, YAML, TOML, INI, Nix and Terraform, sections for Markdown, elements for HTML and XML, tables and columns for SQL, rules for CSS; Markdown JSON dumps include inline nodes.
 - **Raw tree-sitter queries** when patterns are not enough.
-- **13 languages**: Rust, Go, Python, TypeScript, TSX, JavaScript/JSX, Zig, Bash, JSON, YAML, XML, HTML, Markdown.
+- **40 languages**: Rust, Go, Python, TypeScript, TSX, JavaScript/JSX, Java, Kotlin, Scala, Swift, C, C++, C#, Dart, Ruby, Crystal, PHP, Lua, Elixir, Haskell, OCaml, Zig, Bash, SQL, Terraform/HCL, Nix, Protobuf, GraphQL, CSS, SCSS, JSON, YAML, TOML, INI, Dockerfile, Makefile, CMake, XML, HTML, Markdown.
 
 ## Install
 
@@ -117,4 +117,4 @@ CI runs clippy, tests on Linux and macOS, pytest, a wheel and a binary smoke tes
 
 ## License
 
-MIT. The vendored [tree-sitter](https://github.com/4thel00z/codeedit/tree/main/vendor/tree-sitter) runtime and all grammars are MIT as well; see [`vendor/tree-sitter/UPSTREAM`](https://github.com/4thel00z/codeedit/blob/main/vendor/tree-sitter/UPSTREAM) for the one local patch.
+MIT. The vendored [tree-sitter](https://github.com/4thel00z/codeedit/tree/main/vendor/tree-sitter) runtime, the vendored [Dockerfile grammar](https://github.com/4thel00z/codeedit/tree/main/vendor/tree-sitter-dockerfile) and all other grammars are MIT as well; each `vendor/*/UPSTREAM` file lists the commit and local patches.

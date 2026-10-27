@@ -1,13 +1,13 @@
 ---
 name: codeedit
-description: Use when reading or editing source code by structure instead of by line or regex — replacing a function or method body, inserting or deleting a definition, adding an import, renaming an identifier across files, bulk rewrites like `$E.unwrap()` to `$E?`, finding call sites, listing a file's definitions, or dumping a syntax tree as JSON. Covers Rust, Go, Python, TypeScript, JavaScript, JSX, TSX, Zig, Bash, JSON, YAML, XML, HTML and Markdown. Use instead of sed, awk or hand-counted line ranges.
+description: Use when reading or editing source code by structure instead of by line or regex — replacing a function or method body, inserting or deleting a definition, adding an import, renaming an identifier across files, bulk rewrites like `$E.unwrap()` to `$E?`, finding call sites, listing a file's definitions, or dumping a syntax tree as JSON. Covers Rust, Go, Python, TypeScript, JavaScript, JSX, TSX, Java, Kotlin, Scala, Swift, C, C++, C#, Dart, Ruby, Crystal, PHP, Lua, Elixir, Haskell, OCaml, Zig, Bash, SQL, Terraform/HCL, Nix, Protobuf, GraphQL, CSS, SCSS, JSON, YAML, TOML, INI, Dockerfile, Makefile, CMake, XML, HTML and Markdown. Use instead of sed, awk or hand-counted line ranges.
 ---
 
 # codeedit
 
 The `codeedit` CLI and the `codeedit` Python package (`import codeedit`), built on tree-sitter. Reads code as a syntax tree, edits it by symbol or pattern, and rejects any edit that is stale, overlapping, or adds syntax errors. Every editing command prints a unified diff; `-n` previews without writing, `--json` prints `{file, diff, edits, errors_before, errors_after}`.
 
-Language comes from the file extension; force it with `-l python` (`apply` and `edit` take a `"language"` key instead). Run `codeedit <command> --help` for flags. JSON input with an unknown key is rejected, so a typo cannot silently drop a check. CRLF files stay CRLF.
+Language comes from the file extension or name (`Makefile`, `CMakeLists.txt`, `Dockerfile`, `Gemfile`, `.h` is C, `.tf` is HCL); force it with `-l python` (`apply` and `edit` take a `"language"` key instead). `codeedit languages` lists them. Run `codeedit <command> --help` for flags. JSON input with an unknown key is rejected, so a typo cannot silently drop a check. CRLF files stay CRLF.
 
 ## Read
 
@@ -18,7 +18,7 @@ codeedit parse src/lib.rs                 # tree as JSON; -f sexp|xml|dot
 cat x.json | codeedit parse - -l json -f sexp
 ```
 
-Symbol paths: `Class.method`, Rust `impl Point` / `impl Display for Point` / `Point.new`, Go receiver methods `List.Push`, JSON/YAML keys `a.b`, Markdown sections by heading `Intro.Install`, HTML/XML elements `div.p`. A bare name works when unique; an ambiguous one errors and lists candidates as `path:line`, which addresses one of them (`A.x:6` for a property setter). A symbol includes its decorators, attributes, `export` and doc comments. `get` returns `text` dedented to column 0, so it can be edited and passed back to `replace`; `bytes` is the exact range in the file.
+Symbol paths: `Class.method`, Rust `impl Point` / `impl Display for Point` / `Point.new`, Go receiver methods `List.Push`, C++ out-of-class definitions `Greeter.greet`, Scala companions `object Greeter`, Swift `extension Greeter`, Haskell `instance Shape Point`, Terraform blocks `resource.aws_instance.web` and attributes `resource.aws_instance.web.ami`, SQL `users.id`, JSON/YAML/TOML/INI/Nix keys `a.b`, Markdown sections by heading `Intro.Install`, HTML/XML elements `div.p`, CSS rules by selector `.card:hover`. A bare name works when unique; an ambiguous one errors and lists candidates as `path:line`, which addresses one of them (`A.x:6` for a property setter). A symbol includes its decorators, attributes, `export` and doc comments. `get` returns `text` dedented to column 0, so it can be edited and passed back to `replace`; `bytes` is the exact range in the file.
 
 ## Edit one symbol
 
@@ -79,6 +79,9 @@ Get byte ranges from `outline`, `get`, `find` or `parse`, and pass `expect` so a
 
 - In zsh, `echo '...\n...'` turns `\n` into a real newline and breaks JSON. Use a heredoc or `printf '%s'`.
 - `rename` renames every identifier with that spelling, including unrelated ones. Preview with `-n`.
+- In PHP and SCSS, `$NAME` in a pattern is always a metavariable, so a literal `$FOO` variable cannot be matched; lowercase `$foo` stays literal.
+- A metavariable cannot stand in for a TOML or INI value (`name = $V` does not parse); spell the value out, or use `query` with `(pair (bare_key) @k (_) @v)`.
+- `add-import` works in Python, Rust, Go, JS/TS, Zig, Ruby, Crystal, PHP, C, C++, Java, Kotlin, Swift, C#, Scala, Dart, Lua, Haskell, OCaml, Protobuf, CSS and SCSS; other languages report it as unsupported.
 - Without `-l`, a directory walk skips files whose language the pattern does not parse in; it errors only if no language fits.
 - Patterns see inside Rust macro calls whose arguments parse as expressions or statements (`assert!`, `vec!`, `format!`); other macro bodies are skipped.
 - Existing syntax errors are tolerated; an edit is rejected only when it adds an error somewhere new. `--allow-errors` forces such an edit through.

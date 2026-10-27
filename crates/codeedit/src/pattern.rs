@@ -134,8 +134,32 @@ const fn sigil(language: Language) -> char {
         | Language::Bash
         | Language::JavaScript
         | Language::TypeScript
-        | Language::Tsx => 'µ',
-        Language::Zig => '_',
+        | Language::Tsx
+        | Language::Ruby
+        | Language::Crystal
+        | Language::Php
+        | Language::C
+        | Language::Cpp
+        | Language::Java
+        | Language::Kotlin
+        | Language::Swift
+        | Language::CSharp
+        | Language::Scala
+        | Language::Elixir
+        | Language::Haskell
+        | Language::Hcl => 'µ',
+        Language::Zig
+        | Language::Lua
+        | Language::OCaml
+        | Language::Nix
+        | Language::Sql
+        | Language::Css
+        | Language::Scss
+        | Language::Make
+        | Language::CMake
+        | Language::Ini
+        | Language::GraphQL
+        | Language::Proto => '_',
         _ => '$',
     }
 }
@@ -245,6 +269,26 @@ fn wrappers(language: Language) -> &'static [(&'static str, &'static str)] {
         ],
         Language::Zig => &[("", ""), ("fn wrap() void {\n", "\n}"), ("fn wrap() void {\n", ";\n}")],
         Language::JavaScript | Language::TypeScript | Language::Tsx => &[("", ""), ("class Wrap {\n", "\n}")],
+        Language::C => &[("", ""), ("void µwrap() {\n", "\n}"), ("void µwrap() {\n", ";\n}")],
+        Language::Cpp => &[("", ""), ("void µwrap() {\n", "\n}"), ("void µwrap() {\n", ";\n}"), ("struct µWrap {\n", "\n};")],
+        Language::Java | Language::CSharp => &[
+            ("", ""),
+            ("class µWrap {\n", "\n}"),
+            ("class µWrap { void µwrap() {\n", "\n} }"),
+            ("class µWrap { void µwrap() {\n", ";\n} }"),
+        ],
+        Language::Kotlin => &[("", ""), ("fun µwrap() {\n", "\n}"), ("class µWrap {\n", "\n}")],
+        Language::Swift => &[("", ""), ("func µwrap() {\n", "\n}"), ("class µWrap {\n", "\n}")],
+        Language::Scala => &[("", ""), ("object µWrap {\n", "\n}"), ("def µwrap = {\n", "\n}")],
+        Language::Dart => &[("", ""), ("void wrap() {\n", "\n}"), ("void wrap() {\n", ";\n}"), ("class Wrap {\n", "\n}")],
+        Language::Php => &[("<?php\n", ""), ("<?php\n", ";"), ("<?php\nclass µWrap {\n", "\n}")],
+        Language::Haskell => &[("", ""), ("µwrap = ", "")],
+        Language::OCaml => &[("", ""), ("let wrap = ", "")],
+        Language::Css | Language::Scss => &[("", ""), ("wrap {\n", "\n}")],
+        Language::Nix => &[("", ""), ("{\n", "\n}"), ("let\n", "\nin null")],
+        Language::Proto => &[("", ""), ("message Wrap {\n", "\n}"), ("service Wrap {\n", "\n}"), ("enum Wrap {\n", "\n}")],
+        Language::GraphQL => &[("", ""), ("{\n", "\n}"), ("type Wrap {\n", "\n}")],
+        Language::Make => &[("", ""), ("wrap = ", "")],
         _ => &[("", "")],
     }
 }

@@ -8,7 +8,7 @@ SAMPLE = 'class Greeter:\n    def greet(self, name: str) -> str:\n        return
 
 
 def test_languages() -> None:
-    assert {"python", "rust", "go", "typescript", "tsx", "javascript", "zig", "bash", "json", "xml", "yaml", "markdown", "html"} <= set(codeedit.languages())
+    assert {"python", "rust", "go", "typescript", "tsx", "javascript", "zig", "bash", "json", "xml", "yaml", "markdown", "html", "ruby", "crystal", "php", "c", "cpp", "java", "kotlin", "swift", "csharp", "scala", "dart", "lua", "elixir", "haskell", "ocaml", "sql", "hcl", "nix", "proto", "graphql", "css", "scss", "toml", "ini", "make", "cmake", "dockerfile"} <= set(codeedit.languages())
 
 
 def test_parse_returns_tree() -> None:
