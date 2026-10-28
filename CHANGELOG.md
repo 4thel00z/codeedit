@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/4thel00z/codeedit/compare/v1.2.0...v1.2.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* matcher backtracking, qualified C++ names, Elixir guards and attributes, Haskell bodies ([8374533](https://github.com/4thel00z/codeedit/commit/8374533af921635a8b5e59508c103d13f851dc19))
+
 ## [1.2.0](https://github.com/4thel00z/codeedit/compare/v1.1.0...v1.2.0) (2026-10-27)
 
 
