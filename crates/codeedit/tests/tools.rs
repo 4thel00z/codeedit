@@ -507,3 +507,68 @@ fn add_import_in_more_languages() {
     let unsupported = edit(Language::Toml, "a = 1\n", Operation::AddImport { import: "x".into() });
     assert!(matches!(unsupported, Err(Error::Unsupported(_))));
 }
+
+#[test]
+fn cpp_qualified_definitions_keep_every_scope() {
+    let cpp = "namespace a { namespace b { struct S { void f(); }; } }\nvoid a::b::S::f() {}\n";
+    let found = paths(Language::Cpp, cpp).unwrap();
+    assert_eq!(found.iter().filter(|(path, _)| path == "a.b.S.f").count(), 2, "{found:?}");
+}
+
+#[test]
+fn elixir_guarded_functions_are_listed() {
+    let elixir = "defmodule A do\n  defp g(x) when x > 1 do\n    x\n  end\n  def i(x) when is_nil(x), do: 0\nend\n";
+    assert_eq!(paths(Language::Elixir, elixir).unwrap(), pairs(&[("A", "module"), ("A.g", "function"), ("A.i", "function")]));
+}
+
+#[test]
+fn elixir_module_attributes_stay_with_the_module() {
+    let elixir = "defmodule A do\n  @moduledoc \"x\"\n  @spec f(integer) :: integer\n  def f(x), do: x\nend\n";
+    let tree = parse(elixir.as_bytes(), Language::Elixir).unwrap();
+    let symbols = outline(&tree, elixir.as_bytes(), Language::Elixir).unwrap();
+    let f = symbols.iter().find(|symbol| symbol.path == "A.f").unwrap();
+    assert!(elixir[f.bytes[0]..].starts_with("@spec"), "{}", &elixir[f.bytes[0]..]);
+}
+
+#[test]
+fn dart_named_constructors_are_listed_once() {
+    let dart = "class A {\n  A();\n  A.named();\n}\n";
+    assert_eq!(paths(Language::Dart, dart).unwrap(), pairs(&[("A", "class"), ("A.A", "constructor"), ("A.named", "constructor")]));
+}
+
+#[test]
+fn haskell_signed_functions_keep_their_body() {
+    let haskell = "greet :: String -> String\ngreet name = name\n";
+    let replaced = edit(Language::Haskell, haskell, Operation::ReplaceBody { symbol: "greet".into(), code: "\"hi\"".into() }).unwrap();
+    assert_eq!(replaced, "greet :: String -> String\ngreet name = \"hi\"\n");
+}
+
+#[test]
+fn haskell_where_bindings_do_not_split_a_function() {
+    let haskell = "f :: Int -> Int\nf 0 = g 0\n  where g x = x\nf n = n\n";
+    assert_eq!(paths(Language::Haskell, haskell).unwrap(), pairs(&[("f", "function"), ("f.g", "function")]));
+}
+
+#[test]
+fn haskell_instances_take_insertions() {
+    let haskell = "instance Show P where\n  show _ = \"p\"\n";
+    let inserted = edit(Language::Haskell, haskell, Operation::Insert { symbol: "instance Show P".into(), code: "showList _ = id".into(), position: Position::End }).unwrap();
+    assert_eq!(inserted, "instance Show P where\n  show _ = \"p\"\n  showList _ = id\n");
+}
+
+#[test]
+fn empty_block_bodies_take_content() {
+    let hcl = "resource \"a\" \"b\" {\n}\n";
+    let inserted = edit(Language::Hcl, hcl, Operation::Insert { symbol: "resource.a.b".into(), code: "ami = \"x\"".into(), position: Position::End }).unwrap();
+    assert_eq!(inserted, "resource \"a\" \"b\" {\n  ami = \"x\"\n}\n");
+    let elixir = "defmodule A do\n  def f, do: 1\nend\n";
+    let replaced = edit(Language::Elixir, elixir, Operation::ReplaceBody { symbol: "A.f".into(), code: "2".into() }).unwrap();
+    assert_eq!(replaced, "defmodule A do\n  def f, do: 2\nend\n");
+}
+
+#[test]
+fn c_includes_go_inside_the_include_guard() {
+    let header = "#ifndef A_H\n#define A_H\n\nint f(void);\n\n#endif\n";
+    let added = edit(Language::C, header, Operation::AddImport { import: "#include <stdio.h>".into() }).unwrap();
+    assert_eq!(added, "#ifndef A_H\n#define A_H\n\n#include <stdio.h>\n\nint f(void);\n\n#endif\n");
+}

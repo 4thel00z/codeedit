@@ -232,7 +232,7 @@ const DART: &str = r"
 (extension_declaration name: (_) @name) @definition.extension
 (function_declaration signature: (function_signature name: (identifier) @name)) @definition.function
 (method_declaration signature: (method_signature [(function_signature name: (identifier) @name) (getter_signature name: (identifier) @name) (setter_signature name: (identifier) @name)])) @definition.method
-(declaration (constructor_signature name: (identifier) @name)) @definition.constructor
+(declaration (constructor_signature name: (identifier) @name . parameters: (_))) @definition.constructor
 (declaration (initialized_identifier_list (initialized_identifier name: (identifier) @name))) @definition.field
 (declaration (static_final_declaration_list (static_final_declaration name: (identifier) @name))) @definition.field
 (top_level_variable_declaration (static_final_declaration_list (static_final_declaration name: (identifier) @name))) @definition.variable
@@ -256,6 +256,7 @@ const LUA: &str = r"
 const ELIXIR: &str = r#"
 ((call target: (identifier) @keyword (arguments (alias) @name) (do_block)) @definition.module (#match? @keyword "^(defmodule|defprotocol|defimpl)$"))
 ((call target: (identifier) @keyword (arguments . [(call target: (identifier) @name) (identifier) @name])) @definition.function (#match? @keyword "^(def|defp|defmacro|defmacrop|defguard|defguardp|defdelegate)$"))
+((call target: (identifier) @keyword (arguments . (binary_operator left: [(call target: (identifier) @name) (identifier) @name] operator: "when"))) @definition.function (#match? @keyword "^(def|defp|defmacro|defmacrop|defguard|defguardp|defdelegate)$"))
 "#;
 
 const HASKELL: &str = r"
@@ -430,6 +431,7 @@ pub(crate) fn block_bodies(language: Language) -> bool {
             | Language::Make
             | Language::CMake
             | Language::Hcl
+            | Language::Haskell
     )
 }
 
@@ -494,7 +496,7 @@ fn inner_range(node: Node<'_>, source: &[u8]) -> Option<[usize; 2]> {
     Some([node.start_byte(), node.end_byte()])
 }
 
-fn trimmed(range: [usize; 2], source: &[u8]) -> Option<[usize; 2]> {
+pub(crate) fn trimmed(range: [usize; 2], source: &[u8]) -> Option<[usize; 2]> {
     let content = source.get(range[0]..range[1])?;
     let leading = content
         .iter()
@@ -537,13 +539,40 @@ fn definition_body(
         "key" => key_value(node)?,
         _ if language == Language::Haskell => node
             .child_by_field_name("match")
-            .and_then(|found| found.child_by_field_name("expression"))?,
-        _ => node
-            .child_by_field_name("body")
-            .or_else(|| named_body(node))
-            .or_else(|| body(node, 3))?,
+            .and_then(|found| found.child_by_field_name("expression"))
+            .or_else(|| node.child_by_field_name("declarations"))?,
+        _ if language == Language::Elixir && node.child_by_field_name("body").is_none() && named_body(node).is_none() => {
+            return keyword_do(node, source).map(|value| [value.start_byte(), value.end_byte()]);
+        }
+        _ => {
+            let Some(found) = node.child_by_field_name("body").or_else(|| named_body(node)).or_else(|| body(node, 3)) else {
+                return empty_block(node);
+            };
+            found
+        }
     };
     trimmed(inner_range(found, source)?, source)
+}
+
+fn keyword_do<'tree>(node: Node<'tree>, source: &[u8]) -> Option<Node<'tree>> {
+    let mut children = node.walk();
+    let arguments = node.named_children(&mut children).find(|child| child.kind() == "arguments")?;
+    let mut cursor = arguments.walk();
+    let keywords = arguments.named_children(&mut cursor).find(|child| child.kind() == "keywords")?;
+    let mut pairs = keywords.walk();
+    keywords
+        .named_children(&mut pairs)
+        .filter(|pair| pair.kind() == "pair")
+        .find(|pair| pair.child_by_field_name("key").is_some_and(|key| text(key, source).trim() == "do:"))
+        .and_then(|pair| pair.child_by_field_name("value"))
+}
+
+fn empty_block(node: Node<'_>) -> Option<[usize; 2]> {
+    let mut cursor = node.walk();
+    let children: Vec<Node<'_>> = node.children(&mut cursor).collect();
+    let opened = children.iter().any(|child| matches!(child.kind(), "{" | "block_start"));
+    let close = children.iter().rev().find(|child| matches!(child.kind(), "}" | "block_end"))?;
+    opened.then_some([close.start_byte(), close.start_byte()])
 }
 
 fn query(language: Language) -> Result<&'static Query, Error> {
@@ -632,9 +661,21 @@ fn attribute(language: Language, node: Node<'_>, source: &[u8]) -> bool {
     match language {
         Language::Rust => node.kind() == "attribute_item",
         Language::JavaScript | Language::TypeScript | Language::Tsx => node.kind() == "decorator",
-        Language::Elixir => node.kind() == "unary_operator" && text(node, source).starts_with('@'),
+        Language::Elixir => elixir_function_attribute(node, source),
         _ => false,
     }
+}
+
+fn elixir_function_attribute(node: Node<'_>, source: &[u8]) -> bool {
+    if node.kind() != "unary_operator" {
+        return false;
+    }
+    let content = text(node, source);
+    let Some(rest) = content.strip_prefix('@') else {
+        return false;
+    };
+    let name: String = rest.chars().take_while(|character| character.is_alphanumeric() || *character == '_').collect();
+    matches!(name.as_str(), "doc" | "spec" | "impl" | "deprecated" | "since" | "tag")
 }
 
 struct Extent<'tree> {
@@ -735,14 +776,13 @@ fn declared(node: Node<'_>, source: &[u8]) -> Declared {
     let scope = current
         .child_by_field_name("scope")
         .map(|scope| clean_name("method", &text(scope, source)).replace("::", "."));
-    let name = current.child_by_field_name("name").map_or_else(
-        || text(current, source).into_owned(),
-        |name| declared(name, source).name,
-    );
-    Declared {
-        receiver: scope,
-        name,
-    }
+    let inner = current.child_by_field_name("name").map(|name| declared(name, source));
+    let receiver = match (scope, inner.as_ref().and_then(|inner| inner.receiver.clone())) {
+        (Some(scope), Some(rest)) => Some(format!("{scope}.{rest}")),
+        (scope, rest) => scope.or(rest),
+    };
+    let name = inner.map_or_else(|| text(current, source).into_owned(), |inner| inner.name);
+    Declared { receiver, name }
 }
 
 struct Definition {
@@ -869,23 +909,27 @@ pub fn outline(tree: &Tree, source: &[u8], language: Language) -> Result<Vec<Sym
     Ok(nest(found, source))
 }
 
+fn equation_owner(merged: &[Definition], name: &str) -> Option<usize> {
+    let index = merged.iter().rposition(|previous| previous.name == name && matches!(previous.kind.as_str(), "signature" | "function"))?;
+    let owner = merged.get(index)?;
+    let top_level = merged.get(..index)?.iter().all(|earlier| !(earlier.bytes[0] <= owner.bytes[0] && owner.bytes[1] <= earlier.bytes[1]));
+    let nested = merged.get(index + 1..)?.iter().all(|later| owner.bytes[0] <= later.bytes[0] && later.bytes[1] <= owner.bytes[1]);
+    (top_level && nested).then_some(index)
+}
+
 fn merged_equations(found: Vec<Definition>) -> Vec<Definition> {
     let mut merged: Vec<Definition> = Vec::with_capacity(found.len());
     for definition in found {
         let equation = matches!(definition.kind.as_str(), "signature" | "function");
-        let previous = merged.last_mut().filter(|previous| {
-            equation
-                && previous.name == definition.name
-                && matches!(previous.kind.as_str(), "signature" | "function")
-        });
+        let previous = equation.then(|| equation_owner(&merged, &definition.name)).flatten().and_then(|index| merged.get_mut(index));
         let Some(previous) = previous else {
             merged.push(definition);
             continue;
         };
+        previous.body = (previous.kind == "signature").then_some(definition.body).flatten();
         previous.bytes[1] = definition.bytes[1];
         previous.end = definition.end;
         previous.kind = "function".to_owned();
-        previous.body = None;
     }
     for definition in &mut merged {
         if definition.kind == "signature" {

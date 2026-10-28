@@ -348,3 +348,38 @@ fn metavariables_inside_tokens() {
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].bindings["V"].text, "10");
 }
+
+#[test]
+fn embedded_metavariables_finish_on_long_tokens() {
+    let words: Vec<String> = (0..200).map(|index| format!("w{index}")).collect();
+    let source = format!("RUN {}\n", words.join(" "));
+    let started = std::time::Instant::now();
+    let found = try_find(Language::Dockerfile, &rule("RUN $A $B $C $D $E $F zzz", None), &source).unwrap();
+    assert!(found.is_empty());
+    assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
+}
+
+#[test]
+fn underscore_identifiers_stay_literal() {
+    let lua = "_G.x = 1\nfoo.x = 1\n";
+    let found = try_find(Language::Lua, &rule("_G.x = $V", None), lua).unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].text, "_G.x = 1");
+    let graphql = "{ __typename xxtypename }\n";
+    let found = try_find(Language::GraphQL, &rule("__typename", None), graphql).unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    let cmake = "set(OTHER 1)\nset(_PRIV 2)\n";
+    let found = try_find(Language::CMake, &rule("set(_PRIV $V)", None), cmake).unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].bindings["V"].text, "2");
+}
+
+#[test]
+fn scss_variable_declarations_match_with_their_semicolon() {
+    let source = "$primary: red;\n$other: blue;\n";
+    let found = try_find(Language::Scss, &rule("\\$primary: $V;", None), source).unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].bindings["V"].text, "red");
+    let rewritten = try_rewrite(Language::Scss, &rule("\\$primary: $V;", Some("\\$primary: dark$V;")), source).unwrap();
+    assert_eq!(rewritten, "$primary: darkred;\n$other: blue;\n");
+}

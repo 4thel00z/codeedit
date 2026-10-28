@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -68,13 +68,13 @@ pub struct Pattern {
     source: String,
     tree: Tree,
     root: usize,
-    sigil: char,
+    sigil: &'static str,
     language: Language,
     checks: BTreeMap<String, Check>,
     needles: Vec<String>,
 }
 
-fn needles(root: Node<'_>, source: &str, sigil: char) -> Vec<String> {
+fn needles(root: Node<'_>, source: &str, sigil: &str) -> Vec<String> {
     let mut found = Vec::new();
     preorder(root, |node| {
         let word = text(node, source.as_bytes());
@@ -89,7 +89,7 @@ fn needles(root: Node<'_>, source: &str, sigil: char) -> Vec<String> {
 
 const MACRO_WRAPPERS: [(&str, &str); 2] = [("fn µwrap() { µwrap(", "); }"), ("fn µwrap() {\n", "\n}")];
 
-fn explained(tree: &Tree, source: &str, sigil: char) -> bool {
+fn explained(tree: &Tree, source: &str, sigil: &str) -> bool {
     let mut clean = true;
     preorder(tree.root_node(), |node| {
         let stray = node.is_error() && variable(text(node, source.as_bytes()).trim(), sigil).is_none();
@@ -126,7 +126,7 @@ fn relocate(found: Found, from: usize, to: usize, source: &[u8]) -> Found {
     }
 }
 
-const fn sigil(language: Language) -> char {
+const fn sigil(language: Language) -> &'static str {
     match language {
         Language::Go
         | Language::Python
@@ -147,7 +147,7 @@ const fn sigil(language: Language) -> char {
         | Language::Scala
         | Language::Elixir
         | Language::Haskell
-        | Language::Hcl => 'µ',
+        | Language::Hcl => "µ",
         Language::Zig
         | Language::Lua
         | Language::OCaml
@@ -160,19 +160,19 @@ const fn sigil(language: Language) -> char {
         | Language::Ini
         | Language::GraphQL
         | Language::Proto
-        | Language::Dockerfile => '_',
-        _ => '$',
+        | Language::Dockerfile => "_0",
+        _ => "$",
     }
 }
 
-fn marker(variable: bool, sigil: char) -> char {
+fn marker(variable: bool, sigil: &'static str) -> &'static str {
     if variable {
         return sigil;
     }
-    '$'
+    "$"
 }
 
-fn metavariables(pattern: &str, sigil: char) -> String {
+fn metavariables(pattern: &str, sigil: &'static str) -> String {
     let mut output = String::with_capacity(pattern.len());
     let mut dollars = 0;
     for character in pattern.chars() {
@@ -181,15 +181,15 @@ fn metavariables(pattern: &str, sigil: char) -> String {
             continue;
         }
         let variable = character.is_ascii_uppercase() || character == '_' || dollars == 3;
-        output.extend(std::iter::repeat_n(marker(variable, sigil), dollars));
+        output.push_str(&marker(variable, sigil).repeat(dollars));
         dollars = 0;
         output.push(character);
     }
-    output.extend(std::iter::repeat_n(marker(dollars == 3, sigil), dollars));
+    output.push_str(&marker(dollars == 3, sigil).repeat(dollars));
     output
 }
 
-fn substitute(pattern: &str, sigil: char) -> String {
+fn substitute(pattern: &str, sigil: &'static str) -> String {
     pattern
         .split("\\$")
         .map(|piece| metavariables(piece, sigil))
@@ -208,8 +208,8 @@ fn name(rest: &str) -> Option<Option<String>> {
     valid.then(|| Some(rest.to_owned()))
 }
 
-fn variable(value: &str, sigil: char) -> Option<Variable> {
-    let triple: String = std::iter::repeat_n(sigil, 3).collect();
+fn variable(value: &str, sigil: &str) -> Option<Variable> {
+    let triple = sigil.repeat(3);
     if let Some(rest) = value.strip_prefix(&triple) {
         return name(rest).map(Variable::Multiple);
     }
@@ -219,6 +219,8 @@ fn variable(value: &str, sigil: char) -> Option<Variable> {
     }
     name(rest).map(Variable::Single)
 }
+
+type Failed = (usize, usize, Vec<Option<[usize; 2]>>);
 
 enum Segment {
     Literal(String),
@@ -237,17 +239,26 @@ fn variable_name(rest: &str) -> Option<(Option<String>, usize)> {
     Some((bound, taken))
 }
 
-fn segments(text: &str, sigil: char) -> Option<Vec<Segment>> {
+fn sigil_run(text: &str, sigil: &str) -> usize {
+    let mut count = 0;
+    let mut rest = text;
+    while let Some(after) = rest.strip_prefix(sigil) {
+        count += 1;
+        rest = after;
+    }
+    count
+}
+
+fn segments(text: &str, sigil: &str) -> Option<Vec<Segment>> {
     let mut found = Vec::new();
     let mut literal = String::new();
     let mut previous: Option<char> = None;
     let mut rest = text;
     while let Some(character) = rest.chars().next() {
         let word_start = previous.is_none_or(|previous| !previous.is_alphanumeric() && previous != '_');
-        if character == sigil && word_start {
-            let sigils = rest.chars().take_while(|each| *each == sigil).count();
-            let multiple = sigils >= 3;
-            let skipped = if multiple { 3 } else { 1 } * sigil.len_utf8();
+        if word_start && rest.starts_with(sigil) {
+            let multiple = sigil_run(rest, sigil) >= 3;
+            let skipped = if multiple { 3 } else { 1 } * sigil.len();
             if let Some((name, taken)) = rest.get(skipped..).and_then(variable_name) {
                 if !literal.is_empty() {
                     found.push(Segment::Literal(std::mem::take(&mut literal)));
@@ -276,24 +287,18 @@ fn children(node: Node<'_>) -> Vec<Node<'_>> {
     node.children(&mut cursor).filter(|child| !child.is_extra() || child.is_error()).collect()
 }
 
-fn trimmed(range: [usize; 2], source: &[u8]) -> Option<[usize; 2]> {
-    let content = source.get(range[0]..range[1])?;
-    let leading = content.iter().take_while(|byte| byte.is_ascii_whitespace()).count();
-    let trailing = content.iter().rev().take_while(|byte| byte.is_ascii_whitespace()).count();
-    if leading + trailing >= content.len() {
-        return None;
-    }
-    Some([range[0] + leading, range[1] - trailing])
+fn gap(range: [usize; 2], source: &[u8]) -> Option<[usize; 2]> {
+    crate::symbols::trimmed(range, source).filter(|found| found[0] != found[1])
 }
 
 fn gaps(node: Node<'_>, source: &[u8]) -> Vec<[usize; 2]> {
     let mut found = Vec::new();
     let mut cursor = node.start_byte();
     for child in children(node) {
-        found.extend(trimmed([cursor, child.start_byte()], source));
+        found.extend(gap([cursor, child.start_byte()], source));
         cursor = child.end_byte();
     }
-    found.extend(trimmed([cursor, node.end_byte()], source));
+    found.extend(gap([cursor, node.end_byte()], source));
     found
 }
 
@@ -319,7 +324,7 @@ fn kinds(grammar: &tree_sitter::Language, id: u16) -> Vec<u16> {
     grammar.subtypes_for_supertype(id).iter().flat_map(|subtype| kinds(grammar, *subtype)).collect()
 }
 
-fn names(text: &str, sigil: char) -> Vec<String> {
+fn names(text: &str, sigil: &str) -> Vec<String> {
     text.split(sigil)
         .skip(1)
         .map(|piece| {
@@ -633,33 +638,57 @@ impl Matcher<'_, '_> {
     }
 
     fn embedded(&mut self, segments: &[Segment], actual: &str, at: usize, kind: u16) -> bool {
-        let Some((first, rest)) = segments.split_first() else {
+        let mut failed = HashSet::new();
+        self.embedded_from(segments, 0, actual, at, kind, &mut failed)
+    }
+
+    fn later_bindings(&self, segments: &[Segment], index: usize) -> Vec<Option<[usize; 2]>> {
+        segments
+            .get(index..)
+            .unwrap_or_default()
+            .iter()
+            .map(|segment| match segment {
+                Segment::Variable { name: Some(name), .. } => self.bindings.iter().find(|bound| bound.name == *name).map(|bound| bound.range),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn embedded_from(&mut self, segments: &[Segment], index: usize, actual: &str, at: usize, kind: u16, failed: &mut HashSet<Failed>) -> bool {
+        let Some(first) = segments.get(index) else {
             return actual.is_empty();
         };
-        match first {
-            Segment::Literal(literal) => {
-                let Some(remaining) = actual.strip_prefix(literal.as_str()) else {
-                    return false;
-                };
-                self.embedded(rest, remaining, at + literal.len(), kind)
-            }
+        let key = (index, at, self.later_bindings(segments, index));
+        if failed.contains(&key) {
+            return false;
+        }
+        let matched = match first {
+            Segment::Literal(literal) => actual
+                .strip_prefix(literal.as_str())
+                .is_some_and(|remaining| self.embedded_from(segments, index + 1, remaining, at + literal.len(), kind, failed)),
             Segment::Variable { name, multiple } => {
                 let checkpoint = self.bindings.len();
                 let minimum = usize::from(!multiple);
                 let ends: Vec<usize> = actual.char_indices().map(|(index, _)| index).chain(std::iter::once(actual.len())).collect();
+                let mut matched = false;
                 for end in ends.into_iter().rev() {
                     if end < minimum {
                         break;
                     }
                     let remaining = actual.get(end..).unwrap_or_default();
-                    if self.bind(name.clone(), [at, at + end], Some(kind)) && self.embedded(rest, remaining, at + end, kind) {
-                        return true;
+                    if self.bind(name.clone(), [at, at + end], Some(kind)) && self.embedded_from(segments, index + 1, remaining, at + end, kind, failed) {
+                        matched = true;
+                        break;
                     }
                     self.bindings.truncate(checkpoint);
                 }
-                false
+                matched
             }
+        };
+        if !matched {
+            failed.insert(key);
         }
+        matched
     }
 
     fn sequence(&mut self, expected: &[Node<'_>], actual: &[Node<'_>], position: usize) -> bool {

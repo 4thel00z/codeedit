@@ -95,7 +95,20 @@ fn indent_unit(language: Language, source: &str) -> &'static str {
     if language == Language::Go || source.lines().any(|line| line.starts_with('\t')) {
         return "\t";
     }
-    "    "
+    let detected = source
+        .lines()
+        .map(|line| line.len() - line.trim_start_matches(' ').len())
+        .find(|width| *width > 0);
+    let two_spaces = matches!(
+        language,
+        Language::Ruby | Language::Crystal | Language::Elixir | Language::Haskell | Language::Hcl | Language::Nix | Language::Yaml | Language::Dart | Language::Scala | Language::Lua
+    );
+    match detected {
+        Some(2) => "  ",
+        Some(_) => "    ",
+        None if two_spaces => "  ",
+        None => "    ",
+    }
 }
 
 fn end_of_line(source: &str, end: usize) -> usize {
@@ -203,7 +216,7 @@ fn body(source: &str, language: Language, symbol: &Symbol) -> Result<Body, Error
             _ => [start, end],
         };
         let indent = match shape {
-            Shape::Block => indent_at(source, start),
+            Shape::Block if start != end => indent_at(source, start),
             _ => nested,
         };
         return Ok(Body {
@@ -565,6 +578,14 @@ fn at_top(tree: &Tree, source: &str, language: Language, position: usize, import
     insertion(position, format!("\n\n{import}{}", "\n".repeat(missing)))
 }
 
+fn include_guard_end(tree: &Tree, source: &str) -> Option<usize> {
+    let guarded = top_level(tree, &["preproc_ifdef", "preproc_if"]);
+    let guard = guarded.first()?;
+    let mut cursor = guard.walk();
+    let define = guard.named_children(&mut cursor).find(|node| node.kind() == "preproc_def")?;
+    Some(line_end(source, define.start_byte()))
+}
+
 fn go_spec(import: &str) -> String {
     let trimmed = import.trim();
     let spec = trimmed
@@ -721,7 +742,9 @@ pub fn add_import(tree: &Tree, source: &str, language: Language, import: &str) -
     if let Some(edit) = after_last(&imports, source, import) {
         return Ok(Some(edit));
     }
-    Ok(Some(at_top(tree, source, language, preamble_end(tree, source, preamble), import)))
+    let guarded = matches!(language, Language::C | Language::Cpp).then(|| include_guard_end(tree, source)).flatten();
+    let position = guarded.unwrap_or_else(|| preamble_end(tree, source, preamble));
+    Ok(Some(at_top(tree, source, language, position, import)))
 }
 
 fn sole<'symbols>(symbols: &'symbols [Symbol], wanted: &str) -> Result<&'symbols Symbol, Error> {
